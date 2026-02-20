@@ -65,7 +65,9 @@ func TestConcurrentLocks(t *testing.T) {
 			concurrent--
 			mu.Unlock()
 
-			lock.release()
+			if err := lock.release(); err != nil {
+				t.Errorf("goroutine %d: release() error: %v", idx, err)
+			}
 		}(i)
 	}
 
@@ -94,5 +96,7 @@ func TestStaleLockRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquireFileLock() with stale lock: %v", err)
 	}
-	lock.release()
+	if err := lock.release(); err != nil {
+		t.Errorf("release() error: %v", err)
+	}
 }

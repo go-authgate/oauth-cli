@@ -251,7 +251,11 @@ func saveTokens(storage *TokenStorage) error {
 	if err != nil {
 		return fmt.Errorf("failed to acquire lock: %w", err)
 	}
-	defer lock.release()
+	defer func() {
+		if releaseErr := lock.release(); releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to release file lock: %v\n", releaseErr)
+		}
+	}()
 
 	var storageMap TokenStorageMap
 	if existing, err := os.ReadFile(tokenFile); err == nil {
@@ -329,7 +333,7 @@ func performAuthCodeFlow(ctx context.Context) (*TokenStorage, error) {
 	fmt.Println("Step 1: Opening authorization URL in your browser...")
 	fmt.Printf("\n  %s\n\n", authURL)
 
-	if err := openBrowser(authURL); err != nil {
+	if err := openBrowser(ctx, authURL); err != nil {
 		fmt.Println("Could not open browser automatically. Please open the URL above manually.")
 	} else {
 		fmt.Println("Browser opened. Please complete authorization in your browser.")
@@ -610,7 +614,12 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *TokenStorage) erro
 
 		fmt.Println("Token refreshed, retrying API call...")
 
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/oauth/tokeninfo", nil)
+		req, err = http.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			serverURL+"/oauth/tokeninfo",
+			nil,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to create retry request: %w", err)
 		}
@@ -671,6 +680,7 @@ func main() {
 			if err != nil {
 				if ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\nInterrupted.")
+					stop()
 					os.Exit(130)
 				}
 				fmt.Printf("Refresh failed: %v\n", err)
@@ -690,7 +700,8 @@ func main() {
 		if err != nil {
 			if ctx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "\nInterrupted.")
-				os.Exit(130)
+				stop()
+				os.Exit(130) //nolint:gocritic
 			}
 			fmt.Fprintf(os.Stderr, "Authorization failed: %v\n", err)
 			os.Exit(1)
@@ -714,6 +725,7 @@ func main() {
 	if err := verifyToken(ctx, storage.AccessToken); err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "\nInterrupted.")
+			stop()
 			os.Exit(130)
 		}
 		fmt.Printf("Token verification failed: %v\n", err)
@@ -726,6 +738,7 @@ func main() {
 	if err := makeAPICallWithAutoRefresh(ctx, storage); err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "\nInterrupted.")
+			stop()
 			os.Exit(130)
 		}
 		if err == ErrRefreshTokenExpired {
@@ -734,6 +747,7 @@ func main() {
 			if err != nil {
 				if ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\nInterrupted.")
+					stop()
 					os.Exit(130)
 				}
 				fmt.Fprintf(os.Stderr, "Re-authentication failed: %v\n", err)
@@ -742,6 +756,7 @@ func main() {
 			if err := makeAPICallWithAutoRefresh(ctx, storage); err != nil {
 				if ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\nInterrupted.")
+					stop()
 					os.Exit(130)
 				}
 				fmt.Fprintf(os.Stderr, "API call failed after re-authentication: %v\n", err)

@@ -81,7 +81,7 @@ func startCallbackServer(ctx context.Context, port int, expectedState string) (s
 	}
 
 	// Use a listener so we can report the actual bound port.
-	ln, err := net.Listen("tcp", srv.Addr)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", srv.Addr)
 	if err != nil {
 		return "", fmt.Errorf("failed to start callback server on port %d: %w", port, err)
 	}

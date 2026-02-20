@@ -1,5 +1,5 @@
 version: 2
-project_name: authgate-cli
+project_name: authgate-oauth-cli
 before:
   hooks:
     - make generate

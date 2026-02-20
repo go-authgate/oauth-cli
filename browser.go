@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -9,17 +10,17 @@ import (
 // openBrowser attempts to open url in the user's default browser.
 // Returns an error if launching the browser fails, but callers should
 // always print the URL as a fallback regardless of the error.
-func openBrowser(url string) error {
+func openBrowser(ctx context.Context, url string) error {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(ctx, "open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
+		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", url)
 	default:
 		// Linux and other Unix-like systems
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(ctx, "xdg-open", url)
 	}
 
 	if err := cmd.Start(); err != nil {
