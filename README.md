@@ -1,5 +1,8 @@
 # AuthGate OAuth CLI — Authorization Code Flow
 
+[![Lint and Testing](https://github.com/go-authgate/oauth-cli/actions/workflows/testing.yml/badge.svg)](https://github.com/go-authgate/oauth-cli/actions/workflows/testing.yml)
+[![Trivy Security Scan](https://github.com/go-authgate/oauth-cli/actions/workflows/security.yml/badge.svg)](https://github.com/go-authgate/oauth-cli/actions/workflows/security.yml)
+
 A command-line tool that demonstrates the **OAuth 2.0 Authorization Code Flow** (RFC 6749 §4.1) with **PKCE** (RFC 7636) against an AuthGate server.
 
 Unlike the Device Code Flow (which shows a user code to enter manually), this flow opens a browser window and receives the authorization code via a local HTTP callback server.
