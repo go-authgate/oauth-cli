@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +16,7 @@ func startCallbackServerAsync(t *testing.T, port int, state string) chan string 
 	t.Helper()
 	ch := make(chan string, 1)
 	go func() {
-		code, err := startCallbackServer(port, state)
+		code, err := startCallbackServer(context.Background(), port, state)
 		if err != nil {
 			ch <- "ERROR:" + err.Error()
 		} else {

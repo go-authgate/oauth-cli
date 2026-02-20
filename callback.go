@@ -26,8 +26,8 @@ type callbackResult struct {
 // for the OAuth callback. It validates the returned state against expectedState
 // and returns the authorization code (or an error).
 //
-// The server shuts itself down after the first request.
-func startCallbackServer(port int, expectedState string) (string, error) {
+// The server shuts itself down after the first request or when ctx is cancelled.
+func startCallbackServer(ctx context.Context, port int, expectedState string) (string, error) {
 	resultCh := make(chan callbackResult, 1)
 
 	// sendResult delivers the result exactly once. Any concurrent or subsequent
@@ -97,7 +97,7 @@ func startCallbackServer(port int, expectedState string) (string, error) {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	// Wait for callback or timeout.
+	// Wait for callback, timeout, or context cancellation.
 	select {
 	case result := <-resultCh:
 		if result.Error != "" {
@@ -107,6 +107,9 @@ func startCallbackServer(port int, expectedState string) (string, error) {
 			return "", fmt.Errorf("%s", result.Error)
 		}
 		return result.Code, nil
+
+	case <-ctx.Done():
+		return "", ctx.Err()
 
 	case <-time.After(callbackTimeout):
 		return "", fmt.Errorf("timed out waiting for browser authorization (%s)", callbackTimeout)
