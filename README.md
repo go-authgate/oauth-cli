@@ -3,16 +3,33 @@
 [![Lint and Testing](https://github.com/go-authgate/oauth-cli/actions/workflows/testing.yml/badge.svg)](https://github.com/go-authgate/oauth-cli/actions/workflows/testing.yml)
 [![Trivy Security Scan](https://github.com/go-authgate/oauth-cli/actions/workflows/security.yml/badge.svg)](https://github.com/go-authgate/oauth-cli/actions/workflows/security.yml)
 
-A command-line tool that demonstrates the **OAuth 2.0 Authorization Code Flow** (RFC 6749 §4.1) with **PKCE** (RFC 7636) against an AuthGate server.
+A CLI tool that authenticates with an AuthGate server by opening your browser, then manages OAuth 2.0 tokens locally — no manual code copying required.
 
-Unlike the Device Code Flow (which shows a user code to enter manually), this flow opens a browser window and receives the authorization code via a local HTTP callback server.
+**What it does:**
 
-## Which Client Mode Should I Use?
+- Opens your browser at the AuthGate authorization page automatically
+- Spins up a local HTTP server to receive the OAuth callback
+- Exchanges the authorization code for tokens and saves them to disk
+- On subsequent runs, reuses valid tokens or refreshes them silently
 
-| Scenario                  | Mode                    | `CLIENT_SECRET` |
-| ------------------------- | ----------------------- | --------------- |
-| SPA, mobile app, CLI tool | **Public + PKCE**       | Leave empty     |
-| Server-side web app       | **Confidential + PKCE** | Set the secret  |
+**Security defaults:**
+
+- PKCE (RFC 7636) always enabled — for both public and confidential clients
+- State parameter validated on every callback to prevent CSRF
+- TLS 1.2+ enforced for all HTTPS connections
+- Token file written with `0600` permissions and atomic rename
+
+---
+
+## Prerequisites
+
+- **Go 1.24+**
+- A running [AuthGate](https://github.com/go-authgate) server
+- An OAuth client registered in AuthGate Admin with:
+  - Grant type: **Authorization Code**
+  - Redirect URI: `http://localhost:8888/callback`
+
+---
 
 ## Quick Start
 
@@ -21,14 +38,42 @@ Unlike the Device Code Flow (which shows a user code to enter manually), this fl
 Navigate to **Admin → OAuth Clients → Create New Client** and configure:
 
 - **Grant Types**: Authorization Code Flow (RFC 6749)
-- **Client Type**: `Public` (no secret) or `Confidential`
 - **Redirect URIs**: `http://localhost:8888/callback`
+- **Client Type**: choose based on your use case:
+
+| Scenario                  | Client Type             | `CLIENT_SECRET` |
+| ------------------------- | ----------------------- | --------------- |
+| SPA, mobile app, CLI tool | **Public + PKCE**       | Leave empty     |
+| Server-side web app       | **Confidential + PKCE** | Set the secret  |
 
 ### 2. Configure
 
 ```bash
 cp .env.example .env
-# Edit .env with your CLIENT_ID (and CLIENT_SECRET for confidential clients)
+# Edit .env — set at minimum CLIENT_ID
+```
+
+`.env.example`:
+
+```ini
+# Required
+CLIENT_ID=your-client-id-here
+
+# Optional: leave empty for public client (PKCE mode), set for confidential client
+CLIENT_SECRET=
+
+# Server configuration
+SERVER_URL=http://localhost:8080
+
+# Callback server (must match the Redirect URI registered in AuthGate)
+CALLBACK_PORT=8888
+REDIRECT_URI=http://localhost:8888/callback
+
+# OAuth scopes (space-separated)
+SCOPE=read write
+
+# Token storage
+TOKEN_FILE=.authgate-tokens.json
 ```
 
 ### 3. Run
@@ -39,16 +84,64 @@ go run .
 go build -o authgate-oauth-cli && ./authgate-oauth-cli
 ```
 
-The tool will:
+---
 
-1. Open your browser at the AuthGate authorization page
-2. After you log in and approve access, the browser redirects to `localhost:8888/callback`
-3. The CLI receives the authorization code, exchanges it for tokens, and saves them locally
-4. On subsequent runs the saved tokens are reused (or refreshed automatically)
+## Terminal Output
+
+**First run** — browser opens, you log in and approve access:
+
+```
+=== OAuth 2.0 Authorization Code Flow CLI Demo ===
+Client mode : public (PKCE)
+Server URL  : http://localhost:8080
+Client ID   : 550e8400-e29b-41d4-a716-446655440000
+
+No existing tokens found, starting Authorization Code Flow...
+Step 1: Opening authorization URL in your browser...
+
+  http://localhost:8080/oauth/authorize?client_id=...&code_challenge=...
+
+Browser opened. Please complete authorization in your browser.
+Step 2: Waiting for callback on http://localhost:8888/callback ...
+Authorization code received!
+Step 3: Exchanging authorization code for tokens...
+Tokens saved to .authgate-tokens.json
+
+========================================
+Current Token Info:
+Access Token : eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9...
+Token Type   : Bearer
+Expires In   : 59m59s
+========================================
+
+Verifying token with server...
+Token Info: {"sub":"user@example.com","scope":"read write","exp":1740048000}
+Token verified successfully.
+
+Demonstrating automatic refresh on API call...
+API call successful!
+```
+
+**Subsequent runs** — tokens are reused without opening the browser:
+
+```
+=== OAuth 2.0 Authorization Code Flow CLI Demo ===
+Client mode : public (PKCE)
+Server URL  : http://localhost:8080
+Client ID   : 550e8400-e29b-41d4-a716-446655440000
+
+Found existing tokens.
+Access token is still valid, using it.
+...
+```
+
+---
 
 ## Configuration
 
-All settings can be provided as flags, environment variables, or in a `.env` file (flag > env > default).
+All settings can be provided as flags, environment variables, or in a `.env` file.
+
+**Precedence:** flag > environment variable > default
 
 | Flag             | Environment Variable | Default                          | Description                                  |
 | ---------------- | -------------------- | -------------------------------- | -------------------------------------------- |
@@ -76,7 +169,11 @@ go run . -client-id=550e8400-... \
          -redirect-uri=http://localhost:9000/callback
 ```
 
+---
+
 ## How It Works
+
+The CLI acts as an OAuth 2.0 client: it builds an authorization URL, opens the browser, then waits on a local HTTP server for the callback carrying the authorization code. Once received, it exchanges the code for tokens and saves them locally.
 
 ```mermaid
 sequenceDiagram
@@ -107,15 +204,35 @@ sequenceDiagram
 
 PKCE (Proof Key for Code Exchange) is used for all clients — including confidential ones — for defence in depth. The CLI generates a fresh `code_verifier` and `code_challenge` on every authorization attempt.
 
-### Token Lifecycle
+---
+
+## Token Lifecycle
+
+On every run the CLI follows this decision tree:
+
+```
+Load token from disk
+       │
+       ├─ Not found ──────────────► Full Authorization Code Flow
+       │
+       ├─ Found, still valid ─────► Use immediately
+       │
+       └─ Found, expired
+              │
+              ├─ Refresh succeeds ► Use refreshed token
+              │
+              └─ Refresh fails ──► Full Authorization Code Flow
+```
 
 - **Reuse**: Valid tokens are loaded from disk and used immediately.
 - **Refresh**: Expired access tokens are refreshed silently using the stored refresh token.
 - **Re-auth**: If the refresh token is also expired or invalid, the full Authorization Code Flow restarts.
 
+---
+
 ## Token Storage
 
-Tokens are saved to `.authgate-tokens.json` (configurable). The file supports multiple client IDs:
+Tokens are saved to `.authgate-tokens.json` (configurable). The file supports multiple client IDs so you can authenticate against several clients without conflicts:
 
 ```json
 {
@@ -133,13 +250,21 @@ Tokens are saved to `.authgate-tokens.json` (configurable). The file supports mu
 
 The file is written with `0600` permissions and uses atomic rename to prevent corruption.
 
+> **Tip:** Add `.authgate-tokens.json` to your `.gitignore` to avoid accidentally committing tokens.
+
+---
+
 ## Security Notes
 
-- **PKCE** prevents authorization code interception attacks (RFC 7636).
-- **State** parameter prevents CSRF attacks; the callback server validates it.
-- **TLS 1.2+** is enforced for all HTTPS connections.
-- **HTTP warning** is printed when the server URL uses plain HTTP.
-- Add `.authgate-tokens.json` to `.gitignore`.
+| Concern                         | Mitigation                                                  |
+| ------------------------------- | ----------------------------------------------------------- |
+| Authorization code interception | PKCE (RFC 7636) — `code_verifier` never leaves the client   |
+| CSRF on callback                | `state` parameter validated before code is accepted         |
+| Token in transit                | TLS 1.2+ enforced for all HTTPS connections                 |
+| Accidental plaintext exposure   | Warning printed when `SERVER_URL` uses plain HTTP           |
+| Token file permissions          | Written as `0600`; uses atomic rename to prevent corruption |
+
+---
 
 ## Troubleshooting
 
@@ -152,6 +277,8 @@ The file is written with `0600` permissions and uses atomic rename to prevent co
 **`invalid_grant`** — The authorization code was already used or expired. Run again to get a new code.
 
 **Token verification failed** — The token may have been revoked. Delete `.authgate-tokens.json` and re-authenticate.
+
+---
 
 ## Learn More
 
