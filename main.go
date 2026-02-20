@@ -339,19 +339,19 @@ func performAuthCodeFlow(ctx context.Context) (*TokenStorage, error) {
 		fmt.Println("Browser opened. Please complete authorization in your browser.")
 	}
 
-	// Start local callback server and wait for the code.
+	// Start local callback server. The exchange runs inside the handler so the
+	// browser sees the true outcome (success or failure) rather than a premature
+	// success page.
 	fmt.Printf("Step 2: Waiting for callback on http://localhost:%d/callback ...\n", callbackPort)
-	code, err := startCallbackServer(ctx, callbackPort, state)
+	storage, err := startCallbackServer(ctx, callbackPort, state,
+		func(cbCtx context.Context, code string) (*TokenStorage, error) {
+			fmt.Println("Authorization code received!")
+			fmt.Println("Step 3: Exchanging authorization code for tokens...")
+			return exchangeCode(cbCtx, code, pkce.Verifier)
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("authorization failed: %w", err)
-	}
-	fmt.Println("Authorization code received!")
-
-	// Exchange code for tokens.
-	fmt.Println("Step 3: Exchanging authorization code for tokens...")
-	storage, err := exchangeCode(ctx, code, pkce.Verifier)
-	if err != nil {
-		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
 
 	if err := saveTokens(storage); err != nil {

@@ -13,21 +13,32 @@ import (
 const (
 	// callbackTimeout is how long we wait for the browser to deliver the code.
 	callbackTimeout = 5 * time.Minute
+
+	// callbackWriteTimeout is the HTTP write deadline for the callback handler.
+	// It must exceed tokenExchangeTimeout to ensure the exchange result can be
+	// written back to the browser before the connection times out.
+	callbackWriteTimeout = 30 * time.Second
 )
 
 // callbackResult holds the outcome of the local callback round-trip.
 type callbackResult struct {
-	Code  string
-	Error string
-	Desc  string
+	Storage *TokenStorage
+	Error   string
+	Desc    string
 }
 
 // startCallbackServer starts a local HTTP server on the given port and waits
-// for the OAuth callback. It validates the returned state against expectedState
-// and returns the authorization code (or an error).
+// for the OAuth callback. It validates the returned state against expectedState,
+// then calls exchangeFn with the received authorization code. The HTTP response
+// is held open until exchangeFn returns so the browser reflects the true outcome.
 //
 // The server shuts itself down after the first request or when ctx is cancelled.
-func startCallbackServer(ctx context.Context, port int, expectedState string) (string, error) {
+func startCallbackServer(
+	ctx context.Context,
+	port int,
+	expectedState string,
+	exchangeFn func(ctx context.Context, code string) (*TokenStorage, error),
+) (*TokenStorage, error) {
 	resultCh := make(chan callbackResult, 1)
 
 	// sendResult delivers the result exactly once. Any concurrent or subsequent
@@ -37,6 +48,14 @@ func startCallbackServer(ctx context.Context, port int, expectedState string) (s
 	sendResult := func(r callbackResult) {
 		once.Do(func() { resultCh <- r })
 	}
+
+	// exchangeOnce ensures the token exchange runs at most once even when the
+	// browser retries the callback request.
+	var (
+		exchangeOnce    sync.Once
+		exchangeStorage *TokenStorage
+		exchangeErr     error
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
@@ -69,21 +88,32 @@ func startCallbackServer(ctx context.Context, port int, expectedState string) (s
 			return
 		}
 
+		// Hold the HTTP response open while exchanging the code for tokens so
+		// the browser reflects the true outcome (success or failure).
+		exchangeOnce.Do(func() {
+			exchangeStorage, exchangeErr = exchangeFn(r.Context(), code)
+		})
+		if exchangeErr != nil {
+			writeCallbackPage(w, false, "token_exchange_failed", exchangeErr.Error())
+			sendResult(callbackResult{Error: "token_exchange_failed", Desc: exchangeErr.Error()})
+			return
+		}
+
 		writeCallbackPage(w, true, "", "")
-		sendResult(callbackResult{Code: code})
+		sendResult(callbackResult{Storage: exchangeStorage})
 	})
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", port),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: callbackWriteTimeout,
 	}
 
 	// Use a listener so we can report the actual bound port.
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", srv.Addr)
 	if err != nil {
-		return "", fmt.Errorf("failed to start callback server on port %d: %w", port, err)
+		return nil, fmt.Errorf("failed to start callback server on port %d: %w", port, err)
 	}
 
 	// Serve in background; shut down after receiving the result.
@@ -102,17 +132,17 @@ func startCallbackServer(ctx context.Context, port int, expectedState string) (s
 	case result := <-resultCh:
 		if result.Error != "" {
 			if result.Desc != "" {
-				return "", fmt.Errorf("%s: %s", result.Error, result.Desc)
+				return nil, fmt.Errorf("%s: %s", result.Error, result.Desc)
 			}
-			return "", fmt.Errorf("%s", result.Error)
+			return nil, fmt.Errorf("%s", result.Error)
 		}
-		return result.Code, nil
+		return result.Storage, nil
 
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return nil, ctx.Err()
 
 	case <-time.After(callbackTimeout):
-		return "", fmt.Errorf("timed out waiting for browser authorization (%s)", callbackTimeout)
+		return nil, fmt.Errorf("timed out waiting for browser authorization (%s)", callbackTimeout)
 	}
 }
 
