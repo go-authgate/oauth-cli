@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+const (
+	lockMaxRetries   = 50
+	lockRetryDelay   = 100 * time.Millisecond
+	staleLockTimeout = 30 * time.Second
+)
+
 // fileLock represents a file lock.
 type fileLock struct {
 	lockFile *os.File
@@ -16,11 +22,8 @@ type fileLock struct {
 // Uses a separate lock file to coordinate access across processes.
 func acquireFileLock(filePath string) (*fileLock, error) {
 	lockPath := filePath + ".lock"
-	maxRetries := 50
-	retryDelay := 100 * time.Millisecond
 
-	for i := 0; i < maxRetries; i++ {
-		// Try to create lock file exclusively (fails if already exists).
+	for range lockMaxRetries {
 		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			fmt.Fprintf(lockFile, "%d", os.Getpid())
@@ -31,9 +34,8 @@ func acquireFileLock(filePath string) (*fileLock, error) {
 		}
 
 		if os.IsExist(err) {
-			// Check if lock file is stale (older than 30 seconds).
 			if info, statErr := os.Stat(lockPath); statErr == nil {
-				if time.Since(info.ModTime()) > 30*time.Second {
+				if time.Since(info.ModTime()) > staleLockTimeout {
 					if remErr := os.Remove(lockPath); remErr != nil && !os.IsNotExist(remErr) {
 						return nil, fmt.Errorf(
 							"failed to remove stale lock file %s: %w",
@@ -44,7 +46,7 @@ func acquireFileLock(filePath string) (*fileLock, error) {
 					continue
 				}
 			}
-			time.Sleep(retryDelay)
+			time.Sleep(lockRetryDelay)
 			continue
 		}
 
@@ -53,7 +55,7 @@ func acquireFileLock(filePath string) (*fileLock, error) {
 
 	return nil, fmt.Errorf(
 		"timeout waiting for file lock after %v",
-		time.Duration(maxRetries)*retryDelay,
+		time.Duration(lockMaxRetries)*lockRetryDelay,
 	)
 }
 
