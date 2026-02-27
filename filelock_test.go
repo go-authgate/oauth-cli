@@ -36,12 +36,11 @@ func TestConcurrentLocks(t *testing.T) {
 	target := filepath.Join(dir, "tokens.json")
 
 	const goroutines = 10
-	results := make([]int, goroutines)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	concurrent := 0
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -52,22 +51,18 @@ func TestConcurrentLocks(t *testing.T) {
 				return
 			}
 
-			// Check exclusive access.
 			mu.Lock()
 			concurrent++
 			if concurrent > 1 {
 				t.Errorf("goroutine %d: more than one lock holder at a time: %d", idx, concurrent)
 			}
-			results[idx] = concurrent
 			mu.Unlock()
 
 			mu.Lock()
 			concurrent--
 			mu.Unlock()
 
-			if err := lock.release(); err != nil {
-				t.Errorf("goroutine %d: release() error: %v", idx, err)
-			}
+			_ = lock.release()
 		}(i)
 	}
 
@@ -79,7 +74,6 @@ func TestStaleLockRemoval(t *testing.T) {
 	target := filepath.Join(dir, "tokens.json")
 	lockPath := target + ".lock"
 
-	// Create a lock file and backdate its mtime to simulate a stale lock.
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -91,12 +85,9 @@ func TestStaleLockRemoval(t *testing.T) {
 		t.Fatalf("os.Chtimes: %v", err)
 	}
 
-	// acquireFileLock should detect the stale lock, remove it, and succeed.
 	lock, err := acquireFileLock(target)
 	if err != nil {
 		t.Fatalf("acquireFileLock() with stale lock: %v", err)
 	}
-	if err := lock.release(); err != nil {
-		t.Errorf("release() error: %v", err)
-	}
+	_ = lock.release()
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,7 +59,7 @@ func TestCallbackServer_Success(t *testing.T) {
 		"http://127.0.0.1:%d/callback?code=mycode123&state=%s",
 		port, state,
 	)
-	resp, err := http.Get(callbackURL) //nolint:noctx,gosec
+	resp, err := http.Get(callbackURL)
 	if err != nil {
 		t.Fatalf("GET callback failed: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestCallbackServer_ExchangeFailure(t *testing.T) {
 	state := "test-state-exchange-fail"
 
 	failFn := func(_ context.Context, _ string) (*TokenStorage, error) {
-		return nil, fmt.Errorf("server returned status 400: invalid_grant")
+		return nil, errors.New("server returned status 400: invalid_grant")
 	}
 	ch := startCallbackServerAsync(t, port, state, failFn)
 
@@ -99,7 +100,7 @@ func TestCallbackServer_ExchangeFailure(t *testing.T) {
 		"http://127.0.0.1:%d/callback?code=badcode&state=%s",
 		port, state,
 	)
-	resp, err := http.Get(callbackURL) //nolint:noctx,gosec
+	resp, err := http.Get(callbackURL)
 	if err != nil {
 		t.Fatalf("GET callback failed: %v", err)
 	}
@@ -139,7 +140,7 @@ func TestCallbackServer_StateMismatch(t *testing.T) {
 		"http://127.0.0.1:%d/callback?code=mycode&state=wrong-state",
 		port,
 	)
-	resp, err := http.Get(callbackURL) //nolint:noctx,gosec
+	resp, err := http.Get(callbackURL)
 	if err != nil {
 		t.Fatalf("GET callback failed: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestCallbackServer_OAuthError(t *testing.T) {
 		"http://127.0.0.1:%d/callback?error=access_denied&error_description=User+denied&state=%s",
 		port, state,
 	)
-	resp, err := http.Get(callbackURL) //nolint:noctx,gosec
+	resp, err := http.Get(callbackURL)
 	if err != nil {
 		t.Fatalf("GET callback failed: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestCallbackServer_DoubleCallback(t *testing.T) {
 	done := make(chan error, 2)
 	for range 2 {
 		go func() {
-			resp, err := http.Get(url) //nolint:noctx,gosec
+			resp, err := http.Get(url)
 			if err == nil {
 				resp.Body.Close()
 			}
@@ -253,7 +254,7 @@ func TestCallbackServer_MissingCode(t *testing.T) {
 		"http://127.0.0.1:%d/callback?state=%s",
 		port, state,
 	)
-	resp, err := http.Get(callbackURL) //nolint:noctx,gosec
+	resp, err := http.Get(callbackURL)
 	if err != nil {
 		t.Fatalf("GET callback failed: %v", err)
 	}

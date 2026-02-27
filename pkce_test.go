@@ -83,7 +83,7 @@ func TestGeneratePKCE_Uniqueness(t *testing.T) {
 	const iterations = 100
 	seen := make(map[string]bool, iterations)
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		p, err := GeneratePKCE()
 		if err != nil {
 			t.Fatalf("GeneratePKCE() error on iteration %d: %v", i, err)
@@ -109,7 +109,7 @@ func TestGenerateState_Length(t *testing.T) {
 func TestGenerateState_Uniqueness(t *testing.T) {
 	const iterations = 50
 	seen := make(map[string]bool, iterations)
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		s, err := generateState()
 		if err != nil {
 			t.Fatalf("generateState() error: %v", err)

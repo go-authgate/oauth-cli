@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -96,7 +98,7 @@ func initConfig() {
 	// Resolve callback port (int flag needs special handling).
 	portStr := ""
 	if *flagCallbackPort != 0 {
-		portStr = fmt.Sprintf("%d", *flagCallbackPort)
+		portStr = strconv.Itoa(*flagCallbackPort)
 	}
 	portStr = getConfig(portStr, "CALLBACK_PORT", "8888")
 	if _, err := fmt.Sscanf(portStr, "%d", &callbackPort); err != nil || callbackPort <= 0 {
@@ -176,7 +178,7 @@ func getEnv(key, defaultValue string) string {
 
 func validateServerURL(rawURL string) error {
 	if rawURL == "" {
-		return fmt.Errorf("server URL cannot be empty")
+		return errors.New("server URL cannot be empty")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -186,7 +188,7 @@ func validateServerURL(rawURL string) error {
 		return fmt.Errorf("URL scheme must be http or https, got: %s", u.Scheme)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("URL must include a host")
+		return errors.New("URL must include a host")
 	}
 	return nil
 }
@@ -208,7 +210,7 @@ type ErrorResponse struct {
 }
 
 // ErrRefreshTokenExpired indicates the refresh token has expired or is invalid.
-var ErrRefreshTokenExpired = fmt.Errorf("refresh token expired or invalid")
+var ErrRefreshTokenExpired = errors.New("refresh token expired or invalid")
 
 // TokenStorage holds persisted OAuth tokens for one client.
 type TokenStorage struct {
@@ -234,7 +236,7 @@ func loadTokens() (*TokenStorage, error) {
 		return nil, fmt.Errorf("failed to parse token file: %w", err)
 	}
 	if storageMap.Tokens == nil {
-		return nil, fmt.Errorf("no tokens in file")
+		return nil, errors.New("no tokens in file")
 	}
 	if storage, ok := storageMap.Tokens[clientID]; ok {
 		return storage, nil
@@ -294,7 +296,7 @@ func saveTokens(storage *TokenStorage) error {
 // validateTokenResponse performs basic sanity checks on a token response.
 func validateTokenResponse(accessToken, tokenType string, expiresIn int) error {
 	if accessToken == "" {
-		return fmt.Errorf("access_token is empty")
+		return errors.New("access_token is empty")
 	}
 	if len(accessToken) < 10 {
 		return fmt.Errorf("access_token is too short (length: %d)", len(accessToken))
@@ -701,7 +703,7 @@ func main() {
 			if ctx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "\nInterrupted.")
 				stop()
-				os.Exit(130) //nolint:gocritic
+				os.Exit(130) //nolint:gocritic // exit code 130 for SIGINT
 			}
 			fmt.Fprintf(os.Stderr, "Authorization failed: %v\n", err)
 			os.Exit(1)
