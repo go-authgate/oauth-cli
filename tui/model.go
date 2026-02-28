@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -32,7 +32,7 @@ const (
 type stepStatus int
 
 const (
-	statusPending    stepStatus = iota
+	statusPending stepStatus = iota
 	statusInProgress
 	statusDone
 	statusSkipped
@@ -180,11 +180,17 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Now().Before(msg.storage.ExpiresAt) {
 			m.stepMessages[stepLoadTokens] = "Found valid token"
 			m.storage = msg.storage
-			return m.startStep(stepVerifyToken, cmdVerifyToken(m.ctx, m.deps, msg.storage.AccessToken))
+			return m.startStep(
+				stepVerifyToken,
+				cmdVerifyToken(m.ctx, m.deps, msg.storage.AccessToken),
+			)
 		}
 		m.stepMessages[stepLoadTokens] = "Token expired"
 		m.storage = msg.storage
-		return m.startStep(stepRefreshToken, cmdRefreshToken(m.ctx, m.deps, msg.storage.RefreshToken))
+		return m.startStep(
+			stepRefreshToken,
+			cmdRefreshToken(m.ctx, m.deps, msg.storage.RefreshToken),
+		)
 
 	case msgTokenRefreshed:
 		if msg.err != nil {
@@ -227,7 +233,10 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.stepMessages[stepOpenBrowser] = "Browser opened"
 		}
-		return m.startStep(stepWaitCallback, cmdWaitCallback(m.ctx, m.deps, m.expectedState, m.pkceVerifier))
+		return m.startStep(
+			stepWaitCallback,
+			cmdWaitCallback(m.ctx, m.deps, m.expectedState, m.pkceVerifier),
+		)
 
 	case msgCallbackReceived:
 		if msg.err != nil {

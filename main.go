@@ -137,7 +137,7 @@ func initConfig() {
 
 	if _, err := uuid.Parse(clientID); err != nil {
 		configWarnings = append(configWarnings,
-			fmt.Sprintf("CLIENT_ID doesn't appear to be a valid UUID: %s", clientID))
+			"CLIENT_ID doesn't appear to be a valid UUID: "+clientID)
 	}
 
 	// Build HTTP client with TLS and retry support.
@@ -536,7 +536,6 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 		storage.RefreshToken = newStorage.RefreshToken
 		storage.ExpiresAt = newStorage.ExpiresAt
 
-
 		req, err = http.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
@@ -573,7 +572,6 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	initConfig()
 
@@ -597,14 +595,17 @@ func main() {
 		CallbackPort:  callbackPort,
 	}
 
-	p := tea.NewProgram(tui.NewOAuthModel(ctx, deps, clientMode, serverURL, clientID, configWarnings))
+	p := tea.NewProgram(
+		tui.NewOAuthModel(ctx, deps, clientMode, serverURL, clientID, configWarnings),
+	)
 	finalRaw, err := p.Run()
 	if err != nil {
+		stop()
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		os.Exit(1)
 	}
+	stop()
 	if m, ok := finalRaw.(tui.OAuthModel); ok && m.ExitCode != 0 {
-		stop()
 		os.Exit(m.ExitCode)
 	}
 }

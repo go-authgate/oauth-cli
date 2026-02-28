@@ -38,7 +38,9 @@ func startCallbackServerAsync(
 }
 
 // mockExchangeFn returns an exchangeFn that succeeds with a stub TokenStorage.
-func mockExchangeFn(t *testing.T) func(ctx context.Context, code string) (*tui.TokenStorage, error) {
+func mockExchangeFn(
+	t *testing.T,
+) func(ctx context.Context, code string) (*tui.TokenStorage, error) {
 	t.Helper()
 	return func(_ context.Context, _ string) (*tui.TokenStorage, error) {
 		return &tui.TokenStorage{

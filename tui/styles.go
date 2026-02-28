@@ -39,11 +39,11 @@ var (
 			Padding(0, 1)
 
 	styleTokenLabel = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Width(16)
+			Foreground(lipgloss.Color("240")).
+			Width(16)
 
 	styleTokenTitle = lipgloss.NewStyle().
-				Bold(true)
+			Bold(true)
 
 	styleError = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")).

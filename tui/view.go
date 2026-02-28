@@ -28,7 +28,7 @@ func (m OAuthModel) View() tea.View {
 	}
 
 	// Steps — only render non-pending steps
-	for i := 0; i < numMainSteps; i++ {
+	for i := range numMainSteps {
 		status := m.stepStatuses[i]
 		if status == statusPending {
 			continue
@@ -65,7 +65,9 @@ func (m OAuthModel) View() tea.View {
 			avail = 74 // sensible fallback before first WindowSizeMsg
 		}
 		b.WriteString(styleURLBox.Render(
-			"  If browser did not open, visit:\n  " + styleAuthURL.Render(wrapURL(m.authURL, avail)),
+			"  If browser did not open, visit:\n  " + styleAuthURL.Render(
+				wrapURL(m.authURL, avail),
+			),
 		))
 		b.WriteString("\n")
 	}
