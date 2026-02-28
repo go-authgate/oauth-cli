@@ -5,21 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-)
 
-// PKCEParams holds the code verifier and challenge for PKCE (RFC 7636).
-type PKCEParams struct {
-	Verifier  string
-	Challenge string
-	Method    string
-}
+	"github.com/go-authgate/oauth-cli/tui"
+)
 
 // GeneratePKCE generates a cryptographically random code_verifier and computes
 // the S256 code_challenge as defined in RFC 7636 §4.1 and §4.2.
 //
 // The verifier is a 32-byte random value base64url-encoded (43 chars, no padding).
 // The challenge is BASE64URL(SHA256(ASCII(verifier))).
-func GeneratePKCE() (*PKCEParams, error) {
+func GeneratePKCE() (*tui.PKCEParams, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return nil, fmt.Errorf("failed to generate random bytes: %w", err)
@@ -30,7 +25,7 @@ func GeneratePKCE() (*PKCEParams, error) {
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 
-	return &PKCEParams{
+	return &tui.PKCEParams{
 		Verifier:  verifier,
 		Challenge: challenge,
 		Method:    "S256",

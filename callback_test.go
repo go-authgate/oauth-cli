@@ -9,10 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-authgate/oauth-cli/tui"
 )
 
 type serverResult struct {
-	storage *TokenStorage
+	storage *tui.TokenStorage
 	err     error
 }
 
@@ -22,7 +24,7 @@ func startCallbackServerAsync(
 	t *testing.T,
 	port int,
 	state string,
-	exchangeFn func(ctx context.Context, code string) (*TokenStorage, error),
+	exchangeFn func(ctx context.Context, code string) (*tui.TokenStorage, error),
 ) chan serverResult {
 	t.Helper()
 	ch := make(chan serverResult, 1)
@@ -36,10 +38,12 @@ func startCallbackServerAsync(
 }
 
 // mockExchangeFn returns an exchangeFn that succeeds with a stub TokenStorage.
-func mockExchangeFn(t *testing.T) func(ctx context.Context, code string) (*TokenStorage, error) {
+func mockExchangeFn(
+	t *testing.T,
+) func(ctx context.Context, code string) (*tui.TokenStorage, error) {
 	t.Helper()
-	return func(_ context.Context, _ string) (*TokenStorage, error) {
-		return &TokenStorage{
+	return func(_ context.Context, _ string) (*tui.TokenStorage, error) {
+		return &tui.TokenStorage{
 			AccessToken:  "mock-access-token",
 			RefreshToken: "mock-refresh-token",
 			TokenType:    "Bearer",
@@ -91,7 +95,7 @@ func TestCallbackServer_ExchangeFailure(t *testing.T) {
 	const port = 19006
 	state := "test-state-exchange-fail"
 
-	failFn := func(_ context.Context, _ string) (*TokenStorage, error) {
+	failFn := func(_ context.Context, _ string) (*tui.TokenStorage, error) {
 		return nil, errors.New("server returned status 400: invalid_grant")
 	}
 	ch := startCallbackServerAsync(t, port, state, failFn)

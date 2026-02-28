@@ -17,9 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	retry "github.com/appleboy/go-httpretry"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+
+	"github.com/go-authgate/oauth-cli/tui"
 )
 
 var (
@@ -32,6 +35,7 @@ var (
 	tokenFile         string
 	configInitialized bool
 	retryClient       *retry.Client
+	configWarnings    []string
 
 	flagServerURL    *string
 	flagClientID     *string
@@ -116,15 +120,10 @@ func initConfig() {
 	}
 
 	if strings.HasPrefix(strings.ToLower(serverURL), "http://") {
-		fmt.Fprintln(
-			os.Stderr,
-			"WARNING: Using HTTP instead of HTTPS. Tokens will be transmitted in plaintext!",
-		)
-		fmt.Fprintln(
-			os.Stderr,
-			"WARNING: This is only safe for local development. Use HTTPS in production.",
-		)
-		fmt.Fprintln(os.Stderr)
+		configWarnings = append(configWarnings,
+			"Using HTTP instead of HTTPS. Tokens will be transmitted in plaintext!")
+		configWarnings = append(configWarnings,
+			"This is only safe for local development. Use HTTPS in production.")
 	}
 
 	if clientID == "" {
@@ -137,12 +136,8 @@ func initConfig() {
 	}
 
 	if _, err := uuid.Parse(clientID); err != nil {
-		fmt.Fprintf(
-			os.Stderr,
-			"WARNING: CLIENT_ID doesn't appear to be a valid UUID: %s\n",
-			clientID,
-		)
-		fmt.Fprintln(os.Stderr)
+		configWarnings = append(configWarnings,
+			"CLIENT_ID doesn't appear to be a valid UUID: "+clientID)
 	}
 
 	// Build HTTP client with TLS and retry support.
@@ -209,29 +204,12 @@ type ErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-// ErrRefreshTokenExpired indicates the refresh token has expired or is invalid.
-var ErrRefreshTokenExpired = errors.New("refresh token expired or invalid")
-
-// TokenStorage holds persisted OAuth tokens for one client.
-type TokenStorage struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	TokenType    string    `json:"token_type"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	ClientID     string    `json:"client_id"`
-}
-
-// TokenStorageMap manages tokens for multiple clients in one file.
-type TokenStorageMap struct {
-	Tokens map[string]*TokenStorage `json:"tokens"`
-}
-
-func loadTokens() (*TokenStorage, error) {
+func loadTokens() (*tui.TokenStorage, error) {
 	data, err := os.ReadFile(tokenFile)
 	if err != nil {
 		return nil, err
 	}
-	var storageMap TokenStorageMap
+	var storageMap tui.TokenStorageMap
 	if err := json.Unmarshal(data, &storageMap); err != nil {
 		return nil, fmt.Errorf("failed to parse token file: %w", err)
 	}
@@ -244,7 +222,7 @@ func loadTokens() (*TokenStorage, error) {
 	return nil, fmt.Errorf("no tokens found for client_id: %s", clientID)
 }
 
-func saveTokens(storage *TokenStorage) error {
+func saveTokens(storage *tui.TokenStorage) error {
 	if storage.ClientID == "" {
 		storage.ClientID = clientID
 	}
@@ -259,14 +237,14 @@ func saveTokens(storage *TokenStorage) error {
 		}
 	}()
 
-	var storageMap TokenStorageMap
+	var storageMap tui.TokenStorageMap
 	if existing, err := os.ReadFile(tokenFile); err == nil {
 		if unmarshalErr := json.Unmarshal(existing, &storageMap); unmarshalErr != nil {
-			storageMap.Tokens = make(map[string]*TokenStorage)
+			storageMap.Tokens = make(map[string]*tui.TokenStorage)
 		}
 	}
 	if storageMap.Tokens == nil {
-		storageMap.Tokens = make(map[string]*TokenStorage)
+		storageMap.Tokens = make(map[string]*tui.TokenStorage)
 	}
 
 	storageMap.Tokens[storage.ClientID] = storage
@@ -314,59 +292,8 @@ func validateTokenResponse(accessToken, tokenType string, expiresIn int) error {
 // Authorization Code Flow
 // -----------------------------------------------------------------------
 
-// performAuthCodeFlow runs the full Authorization Code Flow and returns
-// tokens on success.
-func performAuthCodeFlow(ctx context.Context) (*TokenStorage, error) {
-	// Generate CSRF state.
-	state, err := generateState()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate state: %w", err)
-	}
-
-	// Generate PKCE params (always — even for confidential clients it adds security).
-	pkce, err := GeneratePKCE()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate PKCE: %w", err)
-	}
-
-	// Build authorization URL.
-	authURL := buildAuthURL(state, pkce)
-
-	fmt.Println("Step 1: Opening authorization URL in your browser...")
-	fmt.Printf("\n  %s\n\n", authURL)
-
-	if err := openBrowser(ctx, authURL); err != nil {
-		fmt.Println("Could not open browser automatically. Please open the URL above manually.")
-	} else {
-		fmt.Println("Browser opened. Please complete authorization in your browser.")
-	}
-
-	// Start local callback server. The exchange runs inside the handler so the
-	// browser sees the true outcome (success or failure) rather than a premature
-	// success page.
-	fmt.Printf("Step 2: Waiting for callback on http://localhost:%d/callback ...\n", callbackPort)
-	storage, err := startCallbackServer(ctx, callbackPort, state,
-		func(cbCtx context.Context, code string) (*TokenStorage, error) {
-			fmt.Println("Authorization code received!")
-			fmt.Println("Step 3: Exchanging authorization code for tokens...")
-			return exchangeCode(cbCtx, code, pkce.Verifier)
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("authorization failed: %w", err)
-	}
-
-	if err := saveTokens(storage); err != nil {
-		fmt.Printf("Warning: Failed to save tokens: %v\n", err)
-	} else {
-		fmt.Printf("Tokens saved to %s\n", tokenFile)
-	}
-
-	return storage, nil
-}
-
 // buildAuthURL constructs the /oauth/authorize URL with all required parameters.
-func buildAuthURL(state string, pkce *PKCEParams) string {
+func buildAuthURL(state string, pkce *tui.PKCEParams) string {
 	params := url.Values{}
 	params.Set("client_id", clientID)
 	params.Set("redirect_uri", redirectURI)
@@ -380,7 +307,7 @@ func buildAuthURL(state string, pkce *PKCEParams) string {
 }
 
 // exchangeCode exchanges an authorization code for access + refresh tokens.
-func exchangeCode(ctx context.Context, code, codeVerifier string) (*TokenStorage, error) {
+func exchangeCode(ctx context.Context, code, codeVerifier string) (*tui.TokenStorage, error) {
 	ctx, cancel := context.WithTimeout(ctx, tokenExchangeTimeout)
 	defer cancel()
 
@@ -452,7 +379,7 @@ func exchangeCode(ctx context.Context, code, codeVerifier string) (*TokenStorage
 		return nil, fmt.Errorf("invalid token response: %w", err)
 	}
 
-	return &TokenStorage{
+	return &tui.TokenStorage{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		TokenType:    tokenResp.TokenType,
@@ -465,7 +392,7 @@ func exchangeCode(ctx context.Context, code, codeVerifier string) (*TokenStorage
 // Token refresh
 // -----------------------------------------------------------------------
 
-func refreshAccessToken(ctx context.Context, refreshToken string) (*TokenStorage, error) {
+func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenStorage, error) {
 	ctx, cancel := context.WithTimeout(ctx, refreshTokenTimeout)
 	defer cancel()
 
@@ -503,7 +430,7 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*TokenStorage
 		var errResp ErrorResponse
 		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil {
 			if errResp.Error == "invalid_grant" || errResp.Error == "invalid_token" {
-				return nil, ErrRefreshTokenExpired
+				return nil, tui.ErrRefreshTokenExpired
 			}
 			return nil, fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
 		}
@@ -534,7 +461,7 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*TokenStorage
 		newRefreshToken = refreshToken
 	}
 
-	storage := &TokenStorage{
+	storage := &tui.TokenStorage{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: newRefreshToken,
 		TokenType:    tokenResp.TokenType,
@@ -542,9 +469,6 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*TokenStorage
 		ClientID:     clientID,
 	}
 
-	if err := saveTokens(storage); err != nil {
-		fmt.Printf("Warning: Failed to save refreshed tokens: %v\n", err)
-	}
 	return storage, nil
 }
 
@@ -552,41 +476,40 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*TokenStorage
 // Token verification / API demo
 // -----------------------------------------------------------------------
 
-func verifyToken(ctx context.Context, accessToken string) error {
+func verifyToken(ctx context.Context, accessToken string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, tokenVerificationTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/oauth/tokeninfo", nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	resp, err := retryClient.DoWithContext(ctx, req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp ErrorResponse
 		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil {
-			return fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
+			return "", fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
 		}
-		return fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	fmt.Printf("Token Info: %s\n", string(body))
-	return nil
+	return string(body), nil
 }
 
 // makeAPICallWithAutoRefresh demonstrates the 401 → refresh → retry pattern.
-func makeAPICallWithAutoRefresh(ctx context.Context, storage *TokenStorage) error {
+func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/oauth/tokeninfo", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -600,12 +523,10 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *TokenStorage) erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		fmt.Println("Access token rejected (401), refreshing...")
-
 		newStorage, err := refreshAccessToken(ctx, storage.RefreshToken)
 		if err != nil {
-			if err == ErrRefreshTokenExpired {
-				return ErrRefreshTokenExpired
+			if err == tui.ErrRefreshTokenExpired {
+				return tui.ErrRefreshTokenExpired
 			}
 			return fmt.Errorf("refresh failed: %w", err)
 		}
@@ -613,8 +534,6 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *TokenStorage) erro
 		storage.AccessToken = newStorage.AccessToken
 		storage.RefreshToken = newStorage.RefreshToken
 		storage.ExpiresAt = newStorage.ExpiresAt
-
-		fmt.Println("Token refreshed, retrying API call...")
 
 		req, err = http.NewRequestWithContext(
 			ctx,
@@ -643,7 +562,6 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *TokenStorage) erro
 		return fmt.Errorf("API call failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	fmt.Println("API call successful!")
 	return nil
 }
 
@@ -653,7 +571,6 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *TokenStorage) erro
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	initConfig()
 
@@ -661,112 +578,43 @@ func main() {
 	if !isPublicClient() {
 		clientMode = "confidential"
 	}
-	fmt.Printf("=== OAuth 2.0 Authorization Code Flow CLI Demo ===\n")
-	fmt.Printf("Client mode : %s\n", clientMode)
-	fmt.Printf("Server URL  : %s\n", serverURL)
-	fmt.Printf("Client ID   : %s\n", clientID)
-	fmt.Println()
 
-	var storage *TokenStorage
-
-	// Try to reuse or refresh existing tokens.
-	existing, err := loadTokens()
-	if err == nil && existing != nil {
-		fmt.Println("Found existing tokens.")
-		if time.Now().Before(existing.ExpiresAt) {
-			fmt.Println("Access token is still valid, using it.")
-			storage = existing
-		} else {
-			fmt.Println("Access token expired, attempting refresh...")
-			newStorage, err := refreshAccessToken(ctx, existing.RefreshToken)
+	deps := tui.Deps{
+		LoadTokens: loadTokens,
+		RefreshToken: func(ctx context.Context, refreshToken string) (*tui.TokenStorage, string, error) {
+			storage, err := refreshAccessToken(ctx, refreshToken)
 			if err != nil {
-				if ctx.Err() != nil {
-					fmt.Fprintln(os.Stderr, "\nInterrupted.")
-					stop()
-					os.Exit(130)
-				}
-				fmt.Printf("Refresh failed: %v\n", err)
-				fmt.Println("Starting new authorization flow...")
-			} else {
-				storage = newStorage
-				fmt.Println("Token refreshed successfully.")
+				return nil, "", err
 			}
-		}
-	} else {
-		fmt.Println("No existing tokens found, starting Authorization Code Flow...")
+			saveWarning := ""
+			if saveErr := saveTokens(storage); saveErr != nil {
+				saveWarning = fmt.Sprintf("Warning: Failed to save refreshed tokens: %v", saveErr)
+			}
+			return storage, saveWarning, nil
+		},
+		GenerateState: generateState,
+		GeneratePKCE:  GeneratePKCE,
+		BuildAuthURL:  buildAuthURL,
+		OpenBrowser:   openBrowser,
+		StartCallback: startCallbackServer,
+		ExchangeCode:  exchangeCode,
+		SaveTokens:    saveTokens,
+		VerifyToken:   verifyToken,
+		MakeAPICall:   makeAPICallWithAutoRefresh,
+		CallbackPort:  callbackPort,
 	}
 
-	// No valid tokens — start the full flow.
-	if storage == nil {
-		storage, err = performAuthCodeFlow(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\nInterrupted.")
-				stop()
-				os.Exit(130) //nolint:gocritic // exit code 130 for SIGINT
-			}
-			fmt.Fprintf(os.Stderr, "Authorization failed: %v\n", err)
-			os.Exit(1)
-		}
+	p := tea.NewProgram(
+		tui.NewOAuthModel(ctx, deps, clientMode, serverURL, clientID, configWarnings),
+	)
+	finalRaw, err := p.Run()
+	if err != nil {
+		stop()
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		os.Exit(1)
 	}
-
-	// Display token info.
-	fmt.Printf("\n========================================\n")
-	fmt.Printf("Current Token Info:\n")
-	preview := storage.AccessToken
-	if len(preview) > 50 {
-		preview = preview[:50]
-	}
-	fmt.Printf("Access Token : %s...\n", preview)
-	fmt.Printf("Token Type   : %s\n", storage.TokenType)
-	fmt.Printf("Expires In   : %s\n", time.Until(storage.ExpiresAt).Round(time.Second))
-	fmt.Printf("========================================\n")
-
-	// Verify token against server.
-	fmt.Println("\nVerifying token with server...")
-	if err := verifyToken(ctx, storage.AccessToken); err != nil {
-		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "\nInterrupted.")
-			stop()
-			os.Exit(130)
-		}
-		fmt.Printf("Token verification failed: %v\n", err)
-	} else {
-		fmt.Println("Token verified successfully.")
-	}
-
-	// Demonstrate auto-refresh on 401.
-	fmt.Println("\nDemonstrating automatic refresh on API call...")
-	if err := makeAPICallWithAutoRefresh(ctx, storage); err != nil {
-		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "\nInterrupted.")
-			stop()
-			os.Exit(130)
-		}
-		if err == ErrRefreshTokenExpired {
-			fmt.Println("Refresh token expired, re-authenticating...")
-			storage, err = performAuthCodeFlow(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					fmt.Fprintln(os.Stderr, "\nInterrupted.")
-					stop()
-					os.Exit(130)
-				}
-				fmt.Fprintf(os.Stderr, "Re-authentication failed: %v\n", err)
-				os.Exit(1)
-			}
-			if err := makeAPICallWithAutoRefresh(ctx, storage); err != nil {
-				if ctx.Err() != nil {
-					fmt.Fprintln(os.Stderr, "\nInterrupted.")
-					stop()
-					os.Exit(130)
-				}
-				fmt.Fprintf(os.Stderr, "API call failed after re-authentication: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Println("API call successful after re-authentication.")
-		} else {
-			fmt.Fprintf(os.Stderr, "API call failed: %v\n", err)
-		}
+	stop()
+	if m, ok := finalRaw.(tui.OAuthModel); ok && m.ExitCode != 0 {
+		os.Exit(m.ExitCode)
 	}
 }

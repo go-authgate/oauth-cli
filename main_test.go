@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/go-authgate/oauth-cli/tui"
 )
 
 func TestValidateServerURL(t *testing.T) {
@@ -96,7 +98,7 @@ func TestSaveAndLoadTokens(t *testing.T) {
 	tokenFile = tmpFile.Name()
 	clientID = "test-client-id"
 
-	storage := &TokenStorage{
+	storage := &tui.TokenStorage{
 		AccessToken:  "access-token-value",
 		RefreshToken: "refresh-token-value",
 		TokenType:    "Bearer",
@@ -147,7 +149,7 @@ func TestSaveTokens_MultipleClients(t *testing.T) {
 	// Save tokens for two different clients.
 	for _, id := range []string{"client-a", "client-b"} {
 		clientID = id
-		if err := saveTokens(&TokenStorage{
+		if err := saveTokens(&tui.TokenStorage{
 			AccessToken:  "token-" + id,
 			RefreshToken: "refresh-" + id,
 			TokenType:    "Bearer",
@@ -160,7 +162,7 @@ func TestSaveTokens_MultipleClients(t *testing.T) {
 
 	// Both clients should be present in the file.
 	data, _ := os.ReadFile(tokenFile)
-	var sm TokenStorageMap
+	var sm tui.TokenStorageMap
 	if err := json.Unmarshal(data, &sm); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
@@ -191,7 +193,7 @@ func TestBuildAuthURL_ContainsRequiredParams(t *testing.T) {
 	redirectURI = "http://localhost:8888/callback"
 	scope = "read write"
 
-	pkce := &PKCEParams{
+	pkce := &tui.PKCEParams{
 		Verifier:  "test-verifier",
 		Challenge: "test-challenge",
 		Method:    "S256",
