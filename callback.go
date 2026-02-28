@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/go-authgate/oauth-cli/tui"
 )
 
 const (
@@ -22,7 +24,7 @@ const (
 
 // callbackResult holds the outcome of the local callback round-trip.
 type callbackResult struct {
-	Storage *TokenStorage
+	Storage *tui.TokenStorage
 	Error   string
 	Desc    string
 }
@@ -37,8 +39,8 @@ func startCallbackServer(
 	ctx context.Context,
 	port int,
 	expectedState string,
-	exchangeFn func(ctx context.Context, code string) (*TokenStorage, error),
-) (*TokenStorage, error) {
+	exchangeFn func(ctx context.Context, code string) (*tui.TokenStorage, error),
+) (*tui.TokenStorage, error) {
 	resultCh := make(chan callbackResult, 1)
 
 	// sendResult delivers the result exactly once. Any concurrent or subsequent
@@ -53,7 +55,7 @@ func startCallbackServer(
 	// browser retries the callback request.
 	var (
 		exchangeOnce    sync.Once
-		exchangeStorage *TokenStorage
+		exchangeStorage *tui.TokenStorage
 		exchangeErr     error
 	)
 
