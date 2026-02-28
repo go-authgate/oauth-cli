@@ -16,8 +16,8 @@ func cmdLoadTokens(deps Deps) tea.Cmd {
 
 func cmdRefreshToken(ctx context.Context, deps Deps, refreshToken string) tea.Cmd {
 	return func() tea.Msg {
-		storage, err := deps.RefreshToken(ctx, refreshToken)
-		return msgTokenRefreshed{storage: storage, err: err}
+		storage, saveWarning, err := deps.RefreshToken(ctx, refreshToken)
+		return msgTokenRefreshed{storage: storage, saveWarning: saveWarning, err: err}
 	}
 }
 

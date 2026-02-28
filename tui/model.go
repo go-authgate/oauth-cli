@@ -59,8 +59,9 @@ type msgTokensLoaded struct {
 }
 
 type msgTokenRefreshed struct {
-	storage *TokenStorage
-	err     error
+	storage     *TokenStorage
+	saveWarning string
+	err         error
 }
 
 type msgAuthFlowReady struct {
@@ -204,7 +205,11 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startStep(stepAuthFlow, cmdSetupAuthFlow(m.deps))
 		}
 		m.stepStatuses[stepRefreshToken] = statusDone
-		m.stepMessages[stepRefreshToken] = "Token refreshed"
+		if msg.saveWarning != "" {
+			m.stepMessages[stepRefreshToken] = msg.saveWarning
+		} else {
+			m.stepMessages[stepRefreshToken] = "Token refreshed"
+		}
 		m.storage = msg.storage
 		return m.startStep(stepVerifyToken, cmdVerifyToken(m.ctx, m.deps, msg.storage.AccessToken))
 

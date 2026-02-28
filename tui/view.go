@@ -101,11 +101,15 @@ func wrapURL(u string, maxWidth int) string {
 		return u
 	}
 	const indent = "\n  "
+	const indentLen = len(indent) - 1 // visual width of the indent (2 spaces)
+	// Continuation lines are indented, so they have less usable width.
+	contWidth := max(maxWidth-indentLen, 20)
 	var sb strings.Builder
-	for len(u) > maxWidth {
-		cut := maxWidth
+	lineWidth := maxWidth // first line uses the full width
+	for len(u) > lineWidth {
+		cut := lineWidth
 		// Prefer a break just after '?' or '&' in the latter half of the line.
-		for i := maxWidth - 1; i >= maxWidth/2; i-- {
+		for i := lineWidth - 1; i >= lineWidth/2; i-- {
 			if u[i] == '?' || u[i] == '&' {
 				cut = i + 1
 				break
@@ -114,11 +118,7 @@ func wrapURL(u string, maxWidth int) string {
 		sb.WriteString(u[:cut])
 		sb.WriteString(indent)
 		u = u[cut:]
-		// Continuation lines are shorter by the indent length.
-		maxWidth -= len(indent) - 1
-		if maxWidth < 20 {
-			maxWidth = 20
-		}
+		lineWidth = contWidth // all subsequent lines use the continuation width
 	}
 	sb.WriteString(u)
 	return sb.String()

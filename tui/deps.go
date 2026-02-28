@@ -6,7 +6,7 @@ import "context"
 // Populate this struct in main.go and pass it to NewOAuthModel.
 type Deps struct {
 	LoadTokens    func() (*TokenStorage, error)
-	RefreshToken  func(ctx context.Context, refreshToken string) (*TokenStorage, error)
+	RefreshToken  func(ctx context.Context, refreshToken string) (storage *TokenStorage, saveWarning string, err error)
 	GenerateState func() (string, error)
 	GeneratePKCE  func() (*PKCEParams, error)
 	BuildAuthURL  func(state string, pkce *PKCEParams) string

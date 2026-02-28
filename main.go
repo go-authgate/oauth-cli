@@ -469,7 +469,6 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenSto
 		ClientID:     clientID,
 	}
 
-	_ = saveTokens(storage)
 	return storage, nil
 }
 
@@ -581,8 +580,18 @@ func main() {
 	}
 
 	deps := tui.Deps{
-		LoadTokens:    loadTokens,
-		RefreshToken:  refreshAccessToken,
+		LoadTokens: loadTokens,
+		RefreshToken: func(ctx context.Context, refreshToken string) (*tui.TokenStorage, string, error) {
+			storage, err := refreshAccessToken(ctx, refreshToken)
+			if err != nil {
+				return nil, "", err
+			}
+			saveWarning := ""
+			if saveErr := saveTokens(storage); saveErr != nil {
+				saveWarning = fmt.Sprintf("Warning: Failed to save refreshed tokens: %v", saveErr)
+			}
+			return storage, saveWarning, nil
+		},
 		GenerateState: generateState,
 		GeneratePKCE:  GeneratePKCE,
 		BuildAuthURL:  buildAuthURL,
