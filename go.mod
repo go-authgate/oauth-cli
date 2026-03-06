@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	charm.land/bubbles/v2 v2.0.0
-	charm.land/bubbletea/v2 v2.0.0
+	charm.land/bubbletea/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.0
 	github.com/appleboy/go-httpretry v0.11.0
 	github.com/google/uuid v1.6.0
