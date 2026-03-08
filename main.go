@@ -431,7 +431,7 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenSto
 	if resp.StatusCode != http.StatusOK {
 		// Check for expired/invalid refresh token before general error handling.
 		var errResp ErrorResponse
-		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil {
+		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil && errResp.Error != "" {
 			if errResp.Error == "invalid_grant" || errResp.Error == "invalid_token" {
 				return nil, tui.ErrRefreshTokenExpired
 			}
@@ -517,8 +517,9 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		// Drain body so the HTTP transport can reuse the connection.
+		// Drain and close body immediately so the HTTP transport can reuse the connection.
 		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 
 		newStorage, err := refreshAccessToken(ctx, storage.RefreshToken)
 		if err != nil {
