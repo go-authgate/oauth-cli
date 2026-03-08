@@ -130,6 +130,9 @@ func startCallbackServer(
 	}()
 
 	// Wait for callback, timeout, or context cancellation.
+	timer := time.NewTimer(callbackTimeout)
+	defer timer.Stop()
+
 	select {
 	case result := <-resultCh:
 		if result.Error != "" {
@@ -143,7 +146,7 @@ func startCallbackServer(
 	case <-ctx.Done():
 		return nil, ctx.Err()
 
-	case <-time.After(callbackTimeout):
+	case <-timer.C:
 		return nil, fmt.Errorf("timed out waiting for browser authorization (%s)", callbackTimeout)
 	}
 }

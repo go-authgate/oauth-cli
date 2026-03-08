@@ -196,9 +196,7 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgTokenRefreshed:
 		if msg.err != nil {
 			if isContextCanceled(msg.err) {
-				m.ExitCode = 130
-				m.interrupted = true
-				return m, tea.Quit
+				return m.quitInterrupted()
 			}
 			m.stepStatuses[stepRefreshToken] = statusFailed
 			m.stepMessages[stepRefreshToken] = msg.err.Error()
@@ -216,9 +214,7 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgAuthFlowReady:
 		if msg.err != nil {
 			if isContextCanceled(msg.err) {
-				m.ExitCode = 130
-				m.interrupted = true
-				return m, tea.Quit
+				return m.quitInterrupted()
 			}
 			m.stepStatuses[stepAuthFlow] = statusFailed
 			m.stepMessages[stepAuthFlow] = msg.err.Error()
@@ -246,9 +242,7 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgCallbackReceived:
 		if msg.err != nil {
 			if isContextCanceled(msg.err) {
-				m.ExitCode = 130
-				m.interrupted = true
-				return m, tea.Quit
+				return m.quitInterrupted()
 			}
 			m.stepStatuses[stepWaitCallback] = statusFailed
 			m.stepMessages[stepWaitCallback] = msg.err.Error()
@@ -267,9 +261,7 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgTokenVerified:
 		if msg.err != nil {
 			if isContextCanceled(msg.err) {
-				m.ExitCode = 130
-				m.interrupted = true
-				return m, tea.Quit
+				return m.quitInterrupted()
 			}
 			// Verification failure is non-fatal — still proceed to API call.
 			m.stepStatuses[stepVerifyToken] = statusFailed
@@ -283,9 +275,7 @@ func (m OAuthModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgAPICallDone:
 		if msg.err != nil {
 			if isContextCanceled(msg.err) {
-				m.ExitCode = 130
-				m.interrupted = true
-				return m, tea.Quit
+				return m.quitInterrupted()
 			}
 			if errors.Is(msg.err, ErrRefreshTokenExpired) {
 				// Refresh token expired during API call — restart auth sub-steps.
@@ -323,4 +313,11 @@ func (m OAuthModel) startStep(s step, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 
 func isContextCanceled(err error) bool {
 	return errors.Is(err, context.Canceled)
+}
+
+// quitInterrupted marks the model as interrupted (exit code 130) and returns tea.Quit.
+func (m OAuthModel) quitInterrupted() (tea.Model, tea.Cmd) {
+	m.ExitCode = 130
+	m.interrupted = true
+	return m, tea.Quit
 }
