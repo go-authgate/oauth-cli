@@ -204,6 +204,25 @@ type ErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
+// tokenResponse is the JSON structure returned by /oauth/token.
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"`
+}
+
+// parseOAuthError attempts to extract a structured OAuth error from a non-200
+// response body. Falls back to including the raw body in the error message.
+func parseOAuthError(statusCode int, body []byte, action string) error {
+	var errResp ErrorResponse
+	if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil && errResp.Error != "" {
+		return fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
+	}
+	return fmt.Errorf("%s failed with status %d: %s", action, statusCode, string(body))
+}
+
 func loadTokens() (*tui.TokenStorage, error) {
 	data, err := os.ReadFile(tokenFile)
 	if err != nil {
@@ -317,13 +336,10 @@ func exchangeCode(ctx context.Context, code, codeVerifier string) (*tui.TokenSto
 	data.Set("redirect_uri", redirectURI)
 	data.Set("client_id", clientID)
 
-	if isPublicClient() {
-		// Public client: send code_verifier for PKCE verification.
-		data.Set("code_verifier", codeVerifier)
-	} else {
-		// Confidential client: send client_secret (and also verifier for PKCE).
+	// PKCE is always enabled (defense in depth).
+	data.Set("code_verifier", codeVerifier)
+	if !isPublicClient() {
 		data.Set("client_secret", clientSecret)
-		data.Set("code_verifier", codeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -349,24 +365,10 @@ func exchangeCode(ctx context.Context, code, codeVerifier string) (*tui.TokenSto
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
-		}
-		return nil, fmt.Errorf(
-			"token exchange failed with status %d: %s",
-			resp.StatusCode,
-			string(body),
-		)
+		return nil, parseOAuthError(resp.StatusCode, body, "token exchange")
 	}
 
-	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		TokenType    string `json:"token_type"`
-		ExpiresIn    int    `json:"expires_in"`
-		Scope        string `json:"scope"`
-	}
+	var tokenResp tokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("failed to parse token response: %w", err)
 	}
@@ -427,22 +429,18 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenSto
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		// Check for expired/invalid refresh token before general error handling.
 		var errResp ErrorResponse
-		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil {
+		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil && errResp.Error != "" {
 			if errResp.Error == "invalid_grant" || errResp.Error == "invalid_token" {
 				return nil, tui.ErrRefreshTokenExpired
 			}
 			return nil, fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
 		}
-		return nil, fmt.Errorf("refresh failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, parseOAuthError(resp.StatusCode, body, "refresh")
 	}
 
-	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		TokenType    string `json:"token_type"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
+	var tokenResp tokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("failed to parse token response: %w", err)
 	}
@@ -498,11 +496,7 @@ func verifyToken(ctx context.Context, accessToken string) (string, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil {
-			return "", fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
-		}
-		return "", fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
+		return "", parseOAuthError(resp.StatusCode, body, "token verification")
 	}
 
 	return string(body), nil
@@ -523,6 +517,10 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
+		// Drain and close body immediately so the HTTP transport can reuse the connection.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
 		newStorage, err := refreshAccessToken(ctx, storage.RefreshToken)
 		if err != nil {
 			if err == tui.ErrRefreshTokenExpired {
@@ -531,9 +529,7 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 			return fmt.Errorf("refresh failed: %w", err)
 		}
 
-		storage.AccessToken = newStorage.AccessToken
-		storage.RefreshToken = newStorage.RefreshToken
-		storage.ExpiresAt = newStorage.ExpiresAt
+		*storage = *newStorage
 
 		req, err = http.NewRequestWithContext(
 			ctx,
