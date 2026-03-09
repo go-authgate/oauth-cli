@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-authgate/oauth-cli/tui"
+	"github.com/go-authgate/sdk-go/tokenstore"
 )
 
 func TestValidateServerURL(t *testing.T) {
@@ -81,97 +81,63 @@ func TestValidateTokenResponse(t *testing.T) {
 }
 
 func TestSaveAndLoadTokens(t *testing.T) {
-	// Use a temp file for token storage.
-	tmpFile, err := os.CreateTemp(t.TempDir(), "tokens-*.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpFile.Close()
+	// Use a non-existent path so FileStore starts fresh (empty file causes JSON parse error).
+	store := tokenstore.NewFileStore(filepath.Join(t.TempDir(), "tokens.json"))
+	const testClientID = "test-client-id"
 
-	originalTokenFile := tokenFile
-	originalClientID := clientID
-	t.Cleanup(func() {
-		tokenFile = originalTokenFile
-		clientID = originalClientID
-	})
-
-	tokenFile = tmpFile.Name()
-	clientID = "test-client-id"
-
-	storage := &tui.TokenStorage{
+	token := &tokenstore.Token{
 		AccessToken:  "access-token-value",
 		RefreshToken: "refresh-token-value",
 		TokenType:    "Bearer",
 		ExpiresAt:    time.Now().Add(time.Hour).UTC().Truncate(time.Second),
-		ClientID:     clientID,
+		ClientID:     testClientID,
 	}
 
-	if err := saveTokens(storage); err != nil {
-		t.Fatalf("saveTokens() error: %v", err)
+	if err := store.Save(token); err != nil {
+		t.Fatalf("store.Save() error: %v", err)
 	}
 
-	loaded, err := loadTokens()
+	loaded, err := store.Load(testClientID)
 	if err != nil {
-		t.Fatalf("loadTokens() error: %v", err)
+		t.Fatalf("store.Load() error: %v", err)
 	}
 
-	if loaded.AccessToken != storage.AccessToken {
-		t.Errorf("AccessToken mismatch: got %q, want %q", loaded.AccessToken, storage.AccessToken)
+	if loaded.AccessToken != token.AccessToken {
+		t.Errorf("AccessToken mismatch: got %q, want %q", loaded.AccessToken, token.AccessToken)
 	}
-	if loaded.RefreshToken != storage.RefreshToken {
-		t.Errorf(
-			"RefreshToken mismatch: got %q, want %q",
-			loaded.RefreshToken,
-			storage.RefreshToken,
-		)
+	if loaded.RefreshToken != token.RefreshToken {
+		t.Errorf("RefreshToken mismatch: got %q, want %q", loaded.RefreshToken, token.RefreshToken)
 	}
-	if loaded.ClientID != storage.ClientID {
-		t.Errorf("ClientID mismatch: got %q, want %q", loaded.ClientID, storage.ClientID)
+	if loaded.ClientID != token.ClientID {
+		t.Errorf("ClientID mismatch: got %q, want %q", loaded.ClientID, token.ClientID)
 	}
 }
 
 func TestSaveTokens_MultipleClients(t *testing.T) {
-	tmpFile, err := os.CreateTemp(t.TempDir(), "tokens-multi-*.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpFile.Close()
-
-	originalTokenFile := tokenFile
-	originalClientID := clientID
-	t.Cleanup(func() {
-		tokenFile = originalTokenFile
-		clientID = originalClientID
-	})
-
-	tokenFile = tmpFile.Name()
+	store := tokenstore.NewFileStore(filepath.Join(t.TempDir(), "tokens-multi.json"))
 
 	// Save tokens for two different clients.
 	for _, id := range []string{"client-a", "client-b"} {
-		clientID = id
-		if err := saveTokens(&tui.TokenStorage{
+		if err := store.Save(&tokenstore.Token{
 			AccessToken:  "token-" + id,
 			RefreshToken: "refresh-" + id,
 			TokenType:    "Bearer",
 			ExpiresAt:    time.Now().Add(time.Hour),
 			ClientID:     id,
 		}); err != nil {
-			t.Fatalf("saveTokens(%s) error: %v", id, err)
+			t.Fatalf("store.Save(%s) error: %v", id, err)
 		}
 	}
 
-	// Both clients should be present in the file.
-	data, _ := os.ReadFile(tokenFile)
-	var sm tui.TokenStorageMap
-	if err := json.Unmarshal(data, &sm); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-	if len(sm.Tokens) != 2 {
-		t.Errorf("expected 2 tokens, got %d", len(sm.Tokens))
-	}
+	// Both clients should be loadable.
 	for _, id := range []string{"client-a", "client-b"} {
-		if _, ok := sm.Tokens[id]; !ok {
-			t.Errorf("token for %s not found", id)
+		tok, err := store.Load(id)
+		if err != nil {
+			t.Errorf("store.Load(%s) error: %v", id, err)
+			continue
+		}
+		if tok.AccessToken != "token-"+id {
+			t.Errorf("client %s: AccessToken = %q, want %q", id, tok.AccessToken, "token-"+id)
 		}
 	}
 }
