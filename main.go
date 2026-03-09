@@ -17,12 +17,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-authgate/oauth-cli/tui"
+	"github.com/go-authgate/sdk-go/tokenstore"
+
 	tea "charm.land/bubbletea/v2"
 	retry "github.com/appleboy/go-httpretry"
+
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
-
-	"github.com/go-authgate/oauth-cli/tui"
 )
 
 var (
@@ -33,6 +35,8 @@ var (
 	callbackPort      int
 	scope             string
 	tokenFile         string
+	tokenStoreMode    string
+	tokenStore        tokenstore.Store
 	configInitialized bool
 	retryClient       *retry.Client
 	configWarnings    []string
@@ -44,6 +48,7 @@ var (
 	flagCallbackPort *int
 	flagScope        *string
 	flagTokenFile    *string
+	flagTokenStore   *string
 )
 
 const (
@@ -81,6 +86,11 @@ func init() {
 		"token-file",
 		"",
 		"Token storage file (default: .authgate-tokens.json or TOKEN_FILE env)",
+	)
+	flagTokenStore = flag.String(
+		"token-store",
+		"",
+		"Token storage backend: auto, file, keyring (default: auto or TOKEN_STORE env)",
 	)
 }
 
@@ -155,6 +165,44 @@ func initConfig() {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create retry client: %v", err))
 	}
+
+	const defaultKeyringService = "authgate-oauth-cli"
+	tokenStoreMode = getConfig(*flagTokenStore, "TOKEN_STORE", "auto")
+	var warnings []string
+	var err2 error
+	tokenStore, warnings, err2 = initTokenStore(tokenStoreMode, tokenFile, defaultKeyringService)
+	if err2 != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err2)
+		os.Exit(1)
+	}
+	configWarnings = append(configWarnings, warnings...)
+}
+
+// initTokenStore creates a token store based on the given mode.
+// It returns the store, any warnings, and an error if the mode is invalid.
+func initTokenStore(mode, filePath, keyringService string) (tokenstore.Store, []string, error) {
+	fileStore := tokenstore.NewFileStore(filePath)
+	var warnings []string
+
+	switch mode {
+	case "file":
+		return fileStore, nil, nil
+	case "keyring":
+		return tokenstore.NewKeyringStore(keyringService), nil, nil
+	case "auto":
+		kr := tokenstore.NewKeyringStore(keyringService)
+		store := tokenstore.NewSecureStore(kr, fileStore)
+		if !store.UseKeyring() {
+			warnings = append(warnings,
+				"OS keyring unavailable, falling back to file-based token storage")
+		}
+		return store, warnings, nil
+	default:
+		return nil, nil, fmt.Errorf(
+			"invalid token-store value: %s (must be auto, file, or keyring)",
+			mode,
+		)
+	}
 }
 
 func getConfig(flagValue, envKey, defaultValue string) string {
@@ -221,73 +269,6 @@ func parseOAuthError(statusCode int, body []byte, action string) error {
 		return fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
 	}
 	return fmt.Errorf("%s failed with status %d: %s", action, statusCode, string(body))
-}
-
-func loadTokens() (*tui.TokenStorage, error) {
-	data, err := os.ReadFile(tokenFile)
-	if err != nil {
-		return nil, err
-	}
-	var storageMap tui.TokenStorageMap
-	if err := json.Unmarshal(data, &storageMap); err != nil {
-		return nil, fmt.Errorf("failed to parse token file: %w", err)
-	}
-	if storageMap.Tokens == nil {
-		return nil, errors.New("no tokens in file")
-	}
-	if storage, ok := storageMap.Tokens[clientID]; ok {
-		return storage, nil
-	}
-	return nil, fmt.Errorf("no tokens found for client_id: %s", clientID)
-}
-
-func saveTokens(storage *tui.TokenStorage) error {
-	if storage.ClientID == "" {
-		storage.ClientID = clientID
-	}
-
-	lock, err := acquireFileLock(tokenFile)
-	if err != nil {
-		return fmt.Errorf("failed to acquire lock: %w", err)
-	}
-	defer func() {
-		if releaseErr := lock.release(); releaseErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to release file lock: %v\n", releaseErr)
-		}
-	}()
-
-	var storageMap tui.TokenStorageMap
-	if existing, err := os.ReadFile(tokenFile); err == nil {
-		if unmarshalErr := json.Unmarshal(existing, &storageMap); unmarshalErr != nil {
-			storageMap.Tokens = make(map[string]*tui.TokenStorage)
-		}
-	}
-	if storageMap.Tokens == nil {
-		storageMap.Tokens = make(map[string]*tui.TokenStorage)
-	}
-
-	storageMap.Tokens[storage.ClientID] = storage
-
-	data, err := json.MarshalIndent(storageMap, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tempFile := tokenFile + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	if err := os.Rename(tempFile, tokenFile); err != nil {
-		if removeErr := os.Remove(tempFile); removeErr != nil {
-			return fmt.Errorf(
-				"failed to rename temp file: %v; also failed to remove temp file: %w",
-				err,
-				removeErr,
-			)
-		}
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-	return nil
 }
 
 // validateTokenResponse performs basic sanity checks on a token response.
@@ -576,14 +557,16 @@ func main() {
 	}
 
 	deps := tui.Deps{
-		LoadTokens: loadTokens,
+		LoadTokens: func() (*tui.TokenStorage, error) {
+			return tokenStore.Load(clientID)
+		},
 		RefreshToken: func(ctx context.Context, refreshToken string) (*tui.TokenStorage, string, error) {
 			storage, err := refreshAccessToken(ctx, refreshToken)
 			if err != nil {
 				return nil, "", err
 			}
 			saveWarning := ""
-			if saveErr := saveTokens(storage); saveErr != nil {
+			if saveErr := tokenStore.Save(storage); saveErr != nil {
 				saveWarning = fmt.Sprintf("Warning: Failed to save refreshed tokens: %v", saveErr)
 			}
 			return storage, saveWarning, nil
@@ -594,7 +577,7 @@ func main() {
 		OpenBrowser:   openBrowser,
 		StartCallback: startCallbackServer,
 		ExchangeCode:  exchangeCode,
-		SaveTokens:    saveTokens,
+		SaveTokens:    tokenStore.Save,
 		VerifyToken:   verifyToken,
 		MakeAPICall:   makeAPICallWithAutoRefresh,
 		CallbackPort:  callbackPort,
