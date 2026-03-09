@@ -199,7 +199,11 @@ func TestIsPublicClient(t *testing.T) {
 }
 
 func TestInitTokenStore_File(t *testing.T) {
-	store, warnings, err := initTokenStore("file", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	store, warnings, err := initTokenStore(
+		"file",
+		filepath.Join(t.TempDir(), "tokens.json"),
+		"test-service",
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -212,7 +216,11 @@ func TestInitTokenStore_File(t *testing.T) {
 }
 
 func TestInitTokenStore_Keyring(t *testing.T) {
-	store, warnings, err := initTokenStore("keyring", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	store, warnings, err := initTokenStore(
+		"keyring",
+		filepath.Join(t.TempDir(), "tokens.json"),
+		"test-service",
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,7 +233,11 @@ func TestInitTokenStore_Keyring(t *testing.T) {
 }
 
 func TestInitTokenStore_Auto(t *testing.T) {
-	store, warnings, err := initTokenStore("auto", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	store, warnings, err := initTokenStore(
+		"auto",
+		filepath.Join(t.TempDir(), "tokens.json"),
+		"test-service",
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,7 +260,11 @@ func TestInitTokenStore_Auto(t *testing.T) {
 }
 
 func TestInitTokenStore_Invalid(t *testing.T) {
-	store, _, err := initTokenStore("invalid", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	store, _, err := initTokenStore(
+		"invalid",
+		filepath.Join(t.TempDir(), "tokens.json"),
+		"test-service",
+	)
 	if err == nil {
 		t.Fatal("expected error for invalid mode, got nil")
 	}

@@ -198,7 +198,10 @@ func initTokenStore(mode, filePath, keyringService string) (tokenstore.Store, []
 		}
 		return store, warnings, nil
 	default:
-		return nil, nil, fmt.Errorf("invalid token-store value: %s (must be auto, file, or keyring)", mode)
+		return nil, nil, fmt.Errorf(
+			"invalid token-store value: %s (must be auto, file, or keyring)",
+			mode,
+		)
 	}
 }
 
