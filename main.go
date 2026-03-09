@@ -168,26 +168,37 @@ func initConfig() {
 
 	const defaultKeyringService = "authgate-oauth-cli"
 	tokenStoreMode = getConfig(*flagTokenStore, "TOKEN_STORE", "auto")
-	fileStore := tokenstore.NewFileStore(tokenFile)
-	switch tokenStoreMode {
+	var warnings []string
+	var err2 error
+	tokenStore, warnings, err2 = initTokenStore(tokenStoreMode, tokenFile, defaultKeyringService)
+	if err2 != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err2)
+		os.Exit(1)
+	}
+	configWarnings = append(configWarnings, warnings...)
+}
+
+// initTokenStore creates a token store based on the given mode.
+// It returns the store, any warnings, and an error if the mode is invalid.
+func initTokenStore(mode, filePath, keyringService string) (tokenstore.Store, []string, error) {
+	fileStore := tokenstore.NewFileStore(filePath)
+	var warnings []string
+
+	switch mode {
 	case "file":
-		tokenStore = fileStore
+		return fileStore, nil, nil
 	case "keyring":
-		tokenStore = tokenstore.NewKeyringStore(defaultKeyringService)
+		return tokenstore.NewKeyringStore(keyringService), nil, nil
 	case "auto":
-		kr := tokenstore.NewKeyringStore(defaultKeyringService)
-		tokenStore = tokenstore.NewSecureStore(kr, fileStore)
-		if !tokenStore.(*tokenstore.SecureStore).UseKeyring() {
-			configWarnings = append(configWarnings,
+		kr := tokenstore.NewKeyringStore(keyringService)
+		store := tokenstore.NewSecureStore(kr, fileStore)
+		if !store.UseKeyring() {
+			warnings = append(warnings,
 				"OS keyring unavailable, falling back to file-based token storage")
 		}
+		return store, warnings, nil
 	default:
-		fmt.Fprintf(
-			os.Stderr,
-			"Error: Invalid token-store value: %s (must be auto, file, or keyring)\n",
-			tokenStoreMode,
-		)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("invalid token-store value: %s (must be auto, file, or keyring)", mode)
 	}
 }
 

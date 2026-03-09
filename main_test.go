@@ -198,6 +198,68 @@ func TestIsPublicClient(t *testing.T) {
 	}
 }
 
+func TestInitTokenStore_File(t *testing.T) {
+	store, warnings, err := initTokenStore("file", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+	if _, ok := store.(*tokenstore.FileStore); !ok {
+		t.Errorf("expected *tokenstore.FileStore, got %T", store)
+	}
+}
+
+func TestInitTokenStore_Keyring(t *testing.T) {
+	store, warnings, err := initTokenStore("keyring", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+	if _, ok := store.(*tokenstore.KeyringStore); !ok {
+		t.Errorf("expected *tokenstore.KeyringStore, got %T", store)
+	}
+}
+
+func TestInitTokenStore_Auto(t *testing.T) {
+	store, warnings, err := initTokenStore("auto", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	secureStore, ok := store.(*tokenstore.SecureStore)
+	if !ok {
+		t.Fatalf("expected *tokenstore.SecureStore, got %T", store)
+	}
+	// In CI / test environments the OS keyring is typically unavailable,
+	// so we expect the fallback warning. On systems with a keyring the
+	// warning list will be empty — both cases are valid.
+	if !secureStore.UseKeyring() {
+		if len(warnings) != 1 {
+			t.Errorf("expected 1 fallback warning, got %d: %v", len(warnings), warnings)
+		}
+	} else {
+		if len(warnings) != 0 {
+			t.Errorf("expected no warnings when keyring available, got %v", warnings)
+		}
+	}
+}
+
+func TestInitTokenStore_Invalid(t *testing.T) {
+	store, _, err := initTokenStore("invalid", filepath.Join(t.TempDir(), "tokens.json"), "test-service")
+	if err == nil {
+		t.Fatal("expected error for invalid mode, got nil")
+	}
+	if store != nil {
+		t.Errorf("expected nil store on error, got %T", store)
+	}
+	if !containsSubstring(err.Error(), "invalid token-store value") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 // containsSubstring is a helper to avoid importing strings in tests.
 func containsSubstring(s, sub string) bool {
 	return len(s) >= len(sub) && findSubstring(s, sub)
