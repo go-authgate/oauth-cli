@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/go-authgate/oauth-cli/tui"
-	"github.com/go-authgate/sdk-go/tokenstore"
+	"github.com/go-authgate/sdk-go/credstore"
 )
 
 func TestValidateServerURL(t *testing.T) {
@@ -82,10 +82,10 @@ func TestValidateTokenResponse(t *testing.T) {
 
 func TestSaveAndLoadTokens(t *testing.T) {
 	// Use a non-existent path so FileStore starts fresh (empty file causes JSON parse error).
-	store := tokenstore.NewFileStore(filepath.Join(t.TempDir(), "tokens.json"))
+	store := credstore.NewTokenFileStore(filepath.Join(t.TempDir(), "tokens.json"))
 	const testClientID = "test-client-id"
 
-	token := &tokenstore.Token{
+	token := credstore.Token{
 		AccessToken:  "access-token-value",
 		RefreshToken: "refresh-token-value",
 		TokenType:    "Bearer",
@@ -93,7 +93,7 @@ func TestSaveAndLoadTokens(t *testing.T) {
 		ClientID:     testClientID,
 	}
 
-	if err := store.Save(token); err != nil {
+	if err := store.Save(testClientID, token); err != nil {
 		t.Fatalf("store.Save() error: %v", err)
 	}
 
@@ -114,11 +114,11 @@ func TestSaveAndLoadTokens(t *testing.T) {
 }
 
 func TestSaveTokens_MultipleClients(t *testing.T) {
-	store := tokenstore.NewFileStore(filepath.Join(t.TempDir(), "tokens-multi.json"))
+	store := credstore.NewTokenFileStore(filepath.Join(t.TempDir(), "tokens-multi.json"))
 
 	// Save tokens for two different clients.
 	for _, id := range []string{"client-a", "client-b"} {
-		if err := store.Save(&tokenstore.Token{
+		if err := store.Save(id, credstore.Token{
 			AccessToken:  "token-" + id,
 			RefreshToken: "refresh-" + id,
 			TokenType:    "Bearer",
@@ -210,8 +210,8 @@ func TestInitTokenStore_File(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
-	if _, ok := store.(*tokenstore.FileStore); !ok {
-		t.Errorf("expected *tokenstore.FileStore, got %T", store)
+	if _, ok := store.(*credstore.FileStore[credstore.Token]); !ok {
+		t.Errorf("expected *credstore.FileStore[credstore.Token], got %T", store)
 	}
 }
 
@@ -227,8 +227,8 @@ func TestInitTokenStore_Keyring(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
-	if _, ok := store.(*tokenstore.KeyringStore); !ok {
-		t.Errorf("expected *tokenstore.KeyringStore, got %T", store)
+	if _, ok := store.(*credstore.KeyringStore[credstore.Token]); !ok {
+		t.Errorf("expected *credstore.KeyringStore[credstore.Token], got %T", store)
 	}
 }
 
@@ -241,9 +241,9 @@ func TestInitTokenStore_Auto(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	secureStore, ok := store.(*tokenstore.SecureStore)
+	secureStore, ok := store.(*credstore.SecureStore[credstore.Token])
 	if !ok {
-		t.Fatalf("expected *tokenstore.SecureStore, got %T", store)
+		t.Fatalf("expected *credstore.SecureStore[credstore.Token], got %T", store)
 	}
 	// In CI / test environments the OS keyring is typically unavailable,
 	// so we expect the fallback warning. On systems with a keyring the
