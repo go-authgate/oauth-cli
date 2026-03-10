@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/go-authgate/oauth-cli/tui"
-	"github.com/go-authgate/sdk-go/tokenstore"
+	"github.com/go-authgate/sdk-go/credstore"
 
 	tea "charm.land/bubbletea/v2"
 	retry "github.com/appleboy/go-httpretry"
@@ -36,7 +36,7 @@ var (
 	scope             string
 	tokenFile         string
 	tokenStoreMode    string
-	tokenStore        tokenstore.Store
+	tokenStore        credstore.Store[credstore.Token]
 	configInitialized bool
 	retryClient       *retry.Client
 	configWarnings    []string
@@ -180,23 +180,24 @@ func initConfig() {
 
 // initTokenStore creates a token store based on the given mode.
 // It returns the store, any warnings, and an error if the mode is invalid.
-func initTokenStore(mode, filePath, keyringService string) (tokenstore.Store, []string, error) {
-	fileStore := tokenstore.NewFileStore(filePath)
+func initTokenStore(
+	mode, filePath, keyringService string,
+) (credstore.Store[credstore.Token], []string, error) {
+	fileStore := credstore.NewTokenFileStore(filePath)
 	var warnings []string
 
 	switch mode {
 	case "file":
 		return fileStore, nil, nil
 	case "keyring":
-		return tokenstore.NewKeyringStore(keyringService), nil, nil
+		return credstore.NewTokenKeyringStore(keyringService), nil, nil
 	case "auto":
-		kr := tokenstore.NewKeyringStore(keyringService)
-		store := tokenstore.NewSecureStore(kr, fileStore)
-		if !store.UseKeyring() {
+		ss := credstore.DefaultTokenSecureStore(keyringService, filePath)
+		if !ss.UseKeyring() {
 			warnings = append(warnings,
 				"OS keyring unavailable, falling back to file-based token storage")
 		}
-		return store, warnings, nil
+		return ss, warnings, nil
 	default:
 		return nil, nil, fmt.Errorf(
 			"invalid token-store value: %s (must be auto, file, or keyring)",
@@ -558,7 +559,11 @@ func main() {
 
 	deps := tui.Deps{
 		LoadTokens: func() (*tui.TokenStorage, error) {
-			return tokenStore.Load(clientID)
+			tok, err := tokenStore.Load(clientID)
+			if err != nil {
+				return nil, err
+			}
+			return &tok, nil
 		},
 		RefreshToken: func(ctx context.Context, refreshToken string) (*tui.TokenStorage, string, error) {
 			storage, err := refreshAccessToken(ctx, refreshToken)
@@ -566,7 +571,7 @@ func main() {
 				return nil, "", err
 			}
 			saveWarning := ""
-			if saveErr := tokenStore.Save(storage); saveErr != nil {
+			if saveErr := tokenStore.Save(storage.ClientID, *storage); saveErr != nil {
 				saveWarning = fmt.Sprintf("Warning: Failed to save refreshed tokens: %v", saveErr)
 			}
 			return storage, saveWarning, nil
@@ -577,10 +582,12 @@ func main() {
 		OpenBrowser:   openBrowser,
 		StartCallback: startCallbackServer,
 		ExchangeCode:  exchangeCode,
-		SaveTokens:    tokenStore.Save,
-		VerifyToken:   verifyToken,
-		MakeAPICall:   makeAPICallWithAutoRefresh,
-		CallbackPort:  callbackPort,
+		SaveTokens: func(storage *tui.TokenStorage) error {
+			return tokenStore.Save(storage.ClientID, *storage)
+		},
+		VerifyToken:  verifyToken,
+		MakeAPICall:  makeAPICallWithAutoRefresh,
+		CallbackPort: callbackPort,
 	}
 
 	p := tea.NewProgram(
