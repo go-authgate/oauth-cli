@@ -56,7 +56,7 @@ const (
 	tokenExchangeTimeout     = 10 * time.Second
 	tokenVerificationTimeout = 10 * time.Second
 	refreshTokenTimeout      = 10 * time.Second
-	maxResponseSize          = 1 << 20 // 1 MB
+	maxResponseSize          = 1 << 20 // 1 MiB
 )
 
 func init() {
@@ -269,6 +269,25 @@ type tokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
+// errResponseTooLarge is returned when a server response exceeds maxResponseSize.
+var errResponseTooLarge = fmt.Errorf(
+	"response body exceeds maximum allowed size of %d bytes",
+	maxResponseSize,
+)
+
+// readResponseBody reads up to maxResponseSize bytes from r and returns an
+// explicit error when the response is too large (rather than silently truncating).
+func readResponseBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxResponseSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxResponseSize {
+		return nil, errResponseTooLarge
+	}
+	return body, nil
+}
+
 // parseOAuthError attempts to extract a structured OAuth error from a non-200
 // response body. Falls back to including the raw body in the error message.
 func parseOAuthError(statusCode int, body []byte, action string) error {
@@ -348,7 +367,7 @@ func exchangeCode(ctx context.Context, code, codeVerifier string) (*tui.TokenSto
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -412,7 +431,7 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenSto
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -479,7 +498,7 @@ func verifyToken(ctx context.Context, accessToken string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -538,7 +557,7 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 		defer resp.Body.Close()
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	body, err := readResponseBody(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -274,6 +276,38 @@ func TestInitTokenStore_Invalid(t *testing.T) {
 	if !containsSubstring(err.Error(), "invalid token-store value") {
 		t.Errorf("unexpected error message: %v", err)
 	}
+}
+
+func TestReadResponseBody(t *testing.T) {
+	t.Run("within limit", func(t *testing.T) {
+		data := bytes.Repeat([]byte("a"), 100)
+		body, err := readResponseBody(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(body) != 100 {
+			t.Errorf("expected 100 bytes, got %d", len(body))
+		}
+	})
+
+	t.Run("exactly at limit", func(t *testing.T) {
+		data := bytes.Repeat([]byte("a"), maxResponseSize)
+		body, err := readResponseBody(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(body) != maxResponseSize {
+			t.Errorf("expected %d bytes, got %d", maxResponseSize, len(body))
+		}
+	})
+
+	t.Run("exceeds limit", func(t *testing.T) {
+		data := bytes.Repeat([]byte("a"), maxResponseSize+1)
+		_, err := readResponseBody(bytes.NewReader(data))
+		if !errors.Is(err, errResponseTooLarge) {
+			t.Errorf("expected errResponseTooLarge, got: %v", err)
+		}
+	})
 }
 
 // containsSubstring is a helper to avoid importing strings in tests.
