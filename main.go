@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,18 +29,18 @@ import (
 )
 
 var (
-	serverURL         string
-	clientID          string
-	clientSecret      string
-	redirectURI       string
-	callbackPort      int
-	scope             string
-	tokenFile         string
-	tokenStoreMode    string
-	tokenStore        credstore.Store[credstore.Token]
-	configInitialized bool
-	retryClient       *retry.Client
-	configWarnings    []string
+	serverURL      string
+	clientID       string
+	clientSecret   string
+	redirectURI    string
+	callbackPort   int
+	scope          string
+	tokenFile      string
+	tokenStoreMode string
+	tokenStore     credstore.Store[credstore.Token]
+	configOnce     sync.Once
+	retryClient    *retry.Client
+	configWarnings []string
 
 	flagServerURL    *string
 	flagClientID     *string
@@ -55,6 +56,7 @@ const (
 	tokenExchangeTimeout     = 10 * time.Second
 	tokenVerificationTimeout = 10 * time.Second
 	refreshTokenTimeout      = 10 * time.Second
+	maxResponseSize          = 1 << 20 // 1 MB
 )
 
 func init() {
@@ -96,16 +98,21 @@ func init() {
 
 // initConfig parses flags and initializes all configuration.
 func initConfig() {
-	if configInitialized {
-		return
-	}
-	configInitialized = true
+	configOnce.Do(doInitConfig)
+}
 
+func doInitConfig() {
 	flag.Parse()
 
 	serverURL = getConfig(*flagServerURL, "SERVER_URL", "http://localhost:8080")
 	clientID = getConfig(*flagClientID, "CLIENT_ID", "")
 	clientSecret = getConfig(*flagClientSecret, "CLIENT_SECRET", "")
+	if *flagClientSecret != "" {
+		configWarnings = append(configWarnings,
+			"Client secret passed via command-line flag. "+
+				"This may be visible in process listings. "+
+				"Consider using CLIENT_SECRET env var or .env file instead.")
+	}
 	scope = getConfig(*flagScope, "SCOPE", "read write")
 	tokenFile = getConfig(*flagTokenFile, "TOKEN_FILE", ".authgate-tokens.json")
 
@@ -341,7 +348,7 @@ func exchangeCode(ctx context.Context, code, codeVerifier string) (*tui.TokenSto
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -405,7 +412,7 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenSto
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -472,7 +479,7 @@ func verifyToken(ctx context.Context, accessToken string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -531,7 +538,7 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 		defer resp.Body.Close()
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}
