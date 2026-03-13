@@ -23,7 +23,7 @@ A CLI tool that authenticates with an AuthGate server by opening your browser, t
 
 ## Prerequisites
 
-- **Go 1.24+**
+- **Go 1.25+**
 - A running [AuthGate](https://github.com/go-authgate) server
 - An OAuth client registered in AuthGate Admin with:
   - Grant type: **Authorization Code**
@@ -74,6 +74,9 @@ SCOPE=read write
 
 # Token storage
 TOKEN_FILE=.authgate-tokens.json
+# Token storage backend: auto (default), file, keyring
+# auto = use OS keyring if available, fallback to TOKEN_FILE
+TOKEN_STORE=auto
 ```
 
 ### 3. Run
@@ -81,7 +84,7 @@ TOKEN_FILE=.authgate-tokens.json
 ```bash
 go run .
 # or build first:
-go build -o authgate-oauth-cli && ./authgate-oauth-cli
+make build && ./bin/oauth-cli
 ```
 
 ---
@@ -152,6 +155,7 @@ All settings can be provided as flags, environment variables, or in a `.env` fil
 | `-port`          | `CALLBACK_PORT`      | `8888`                           | Local port for the callback server           |
 | `-scope`         | `SCOPE`              | `read write`                     | Space-separated OAuth scopes                 |
 | `-token-file`    | `TOKEN_FILE`         | `.authgate-tokens.json`          | Token storage file path                      |
+| `-token-store`   | `TOKEN_STORE`        | `auto`                           | Storage backend: `auto`, `file`, or `keyring`|
 
 ### Examples
 
@@ -211,7 +215,7 @@ PKCE (Proof Key for Code Exchange) is used for all clients — including confide
 On every run the CLI follows this decision tree:
 
 ```
-Load token from disk
+Load token from store
        │
        ├─ Not found ──────────────► Full Authorization Code Flow
        │
@@ -224,7 +228,7 @@ Load token from disk
               └─ Refresh fails ──► Full Authorization Code Flow
 ```
 
-- **Reuse**: Valid tokens are loaded from disk and used immediately.
+- **Reuse**: Valid tokens are loaded from the configured store and used immediately.
 - **Refresh**: Expired access tokens are refreshed silently using the stored refresh token.
 - **Re-auth**: If the refresh token is also expired or invalid, the full Authorization Code Flow restarts.
 
@@ -232,7 +236,15 @@ Load token from disk
 
 ## Token Storage
 
-Tokens are saved to `.authgate-tokens.json` (configurable). The file supports multiple client IDs so you can authenticate against several clients without conflicts:
+The CLI supports multiple storage backends, configured via `-token-store` or `TOKEN_STORE`:
+
+| Mode      | Description                                                        |
+| --------- | ------------------------------------------------------------------ |
+| `auto`    | Use OS keyring if available, fall back to file (default)           |
+| `file`    | JSON file at the path specified by `-token-file`                   |
+| `keyring` | OS keyring (macOS Keychain, GNOME Keyring, Windows Credential Manager) |
+
+When using file-based storage, tokens are saved to `.authgate-tokens.json` (configurable). The file supports multiple client IDs so you can authenticate against several clients without conflicts:
 
 ```json
 {
@@ -263,6 +275,7 @@ The file is written with `0600` permissions and uses atomic rename to prevent co
 | Token in transit                | TLS 1.2+ enforced for all HTTPS connections                 |
 | Accidental plaintext exposure   | Warning printed when `SERVER_URL` uses plain HTTP           |
 | Token file permissions          | Written as `0600`; uses atomic rename to prevent corruption |
+| Token storage at rest           | OS keyring preferred (`auto` mode); file fallback with `0600` perms |
 
 ---
 
