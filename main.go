@@ -36,7 +36,6 @@ var (
 	callbackPort   int
 	scope          string
 	tokenFile      string
-	tokenStoreMode string
 	tokenStore     credstore.Store[credstore.Token]
 	configOnce     sync.Once
 	retryClient    *retry.Client
@@ -170,16 +169,16 @@ func doInitConfig() {
 	var err error
 	retryClient, err = retry.NewBackgroundClient(retry.WithHTTPClient(baseHTTPClient))
 	if err != nil {
-		panic(fmt.Sprintf("failed to create retry client: %v", err))
+		fmt.Fprintf(os.Stderr, "Error: failed to create retry client: %v\n", err)
+		os.Exit(1)
 	}
 
 	const defaultKeyringService = "authgate-oauth-cli"
-	tokenStoreMode = getConfig(*flagTokenStore, "TOKEN_STORE", "auto")
+	tokenStoreMode := getConfig(*flagTokenStore, "TOKEN_STORE", "auto")
 	var warnings []string
-	var err2 error
-	tokenStore, warnings, err2 = initTokenStore(tokenStoreMode, tokenFile, defaultKeyringService)
-	if err2 != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err2)
+	tokenStore, warnings, err = initTokenStore(tokenStoreMode, tokenFile, defaultKeyringService)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	configWarnings = append(configWarnings, warnings...)
@@ -296,6 +295,16 @@ func parseOAuthError(statusCode int, body []byte, action string) error {
 		return fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
 	}
 	return fmt.Errorf("%s failed with status %d: %s", action, statusCode, string(body))
+}
+
+// isRefreshTokenError checks whether the response body indicates an expired
+// or invalid refresh token (invalid_grant / invalid_token).
+func isRefreshTokenError(body []byte) bool {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(body, &errResp); err == nil {
+		return errResp.Error == "invalid_grant" || errResp.Error == "invalid_token"
+	}
+	return false
 }
 
 // validateTokenResponse performs basic sanity checks on a token response.
@@ -438,12 +447,8 @@ func refreshAccessToken(ctx context.Context, refreshToken string) (*tui.TokenSto
 
 	if resp.StatusCode != http.StatusOK {
 		// Check for expired/invalid refresh token before general error handling.
-		var errResp ErrorResponse
-		if jsonErr := json.Unmarshal(body, &errResp); jsonErr == nil && errResp.Error != "" {
-			if errResp.Error == "invalid_grant" || errResp.Error == "invalid_token" {
-				return nil, tui.ErrRefreshTokenExpired
-			}
-			return nil, fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDescription)
+		if isRefreshTokenError(body) {
+			return nil, tui.ErrRefreshTokenExpired
 		}
 		return nil, parseOAuthError(resp.StatusCode, body, "refresh")
 	}
@@ -522,10 +527,9 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 	if err != nil {
 		return fmt.Errorf("API request failed: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		// Drain and close body immediately so the HTTP transport can reuse the connection.
+		// Drain and close body so the HTTP transport can reuse the connection.
 		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 
@@ -554,8 +558,8 @@ func makeAPICallWithAutoRefresh(ctx context.Context, storage *tui.TokenStorage) 
 		if err != nil {
 			return fmt.Errorf("retry failed: %w", err)
 		}
-		defer resp.Body.Close()
 	}
+	defer resp.Body.Close()
 
 	body, err := readResponseBody(resp.Body)
 	if err != nil {

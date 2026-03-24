@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,7 +180,7 @@ func TestBuildAuthURL_ContainsRequiredParams(t *testing.T) {
 		"code_challenge=test-challenge",
 		"code_challenge_method=S256",
 	} {
-		if !containsSubstring(u, want) {
+		if !strings.Contains(u, want) {
 			t.Errorf("auth URL missing %q\nURL: %s", want, u)
 		}
 	}
@@ -273,7 +274,7 @@ func TestInitTokenStore_Invalid(t *testing.T) {
 	if store != nil {
 		t.Errorf("expected nil store on error, got %T", store)
 	}
-	if !containsSubstring(err.Error(), "invalid token-store value") {
+	if !strings.Contains(err.Error(), "invalid token-store value") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -308,18 +309,4 @@ func TestReadResponseBody(t *testing.T) {
 			t.Errorf("expected errResponseTooLarge, got: %v", err)
 		}
 	})
-}
-
-// containsSubstring is a helper to avoid importing strings in tests.
-func containsSubstring(s, sub string) bool {
-	return len(s) >= len(sub) && findSubstring(s, sub)
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
