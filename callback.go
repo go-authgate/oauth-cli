@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"html"
 	"net"
@@ -71,9 +72,10 @@ func startCallbackServer(
 			return
 		}
 
-		// Validate state (CSRF protection).
+		// Validate state (CSRF protection) using constant-time comparison.
 		state := q.Get("state")
-		if state != expectedState {
+		if len(state) != len(expectedState) ||
+			subtle.ConstantTimeCompare([]byte(state), []byte(expectedState)) != 1 {
 			writeCallbackPage(w, false, "state_mismatch",
 				"State parameter does not match. Possible CSRF attack.")
 			sendResult(callbackResult{
