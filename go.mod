@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.6
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/appleboy/go-httpretry v0.12.0
-	github.com/go-authgate/sdk-go v0.10.0
+	github.com/go-authgate/sdk-go v0.12.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 )
