@@ -30,8 +30,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/go-authgate/sdk-go v0.10.0 h1:MNcfV6XSPs63SWPDdLqoJ9CFiKlXIue1RmiAbTXDAEI=
-github.com/go-authgate/sdk-go v0.10.0/go.mod h1:Afx/Dbyvf8pw4YeOqVEVdDW2WHhn534Sb2/TaFQktuU=
+github.com/go-authgate/sdk-go v0.14.0 h1:s1i/UCX2Edf3A1pKDW6oXv+oACQfTroxiGY52eqKx+4=
+github.com/go-authgate/sdk-go v0.14.0/go.mod h1:sa0ige5wtayj2WcnXlxa8wGuyi5z/c/chc0mXPJTl/Q=
 github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
 github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
